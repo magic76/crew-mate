@@ -47,7 +47,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public String serializedTrace() { return traceRecorder.serialize(); }
 
     public void start() { harness.start(); }
-    public void close() { modelTurn.clear(); harness.close(); }
+    public void close() {
+        modelTurn.clear();
+        tools.cancelPending();
+        harness.close();
+    }
     public void interrupt() { harness.interrupt(); }
 
     /** Used for typed/private control paths. Live microphone audio stays inside the Gemini adapter. */
