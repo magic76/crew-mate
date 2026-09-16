@@ -11,9 +11,10 @@ import com.magic76.crew.agent.ToolResult;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
-/** Product-owned tool implementations. Approval stays here, never in agent-core. */
+/** Product-owned tool implementations. Delegation and approval stay here, never in agent-core. */
 public final class CrewMateToolRegistry {
     public interface Listener {
         void onSessionChanged(CommunicationSession session);
@@ -22,7 +23,10 @@ public final class CrewMateToolRegistry {
         void onUserInputRequested(CommunicationSession session, String question, String reason);
     }
 
-    private static final String APPROVAL_REASON = "ALWAYS_ASK: every outbound message requires explicit user approval.";
+    private static final String FIRST_MESSAGE_REASON =
+            "ASK_FIRST_MESSAGE: approving this first message delegates routine conversation within the stated goal.";
+    private static final String HIGH_RISK_REASON =
+            "HIGH_RISK: this message may create a payment, cancellation, booking, legal, sensitive-data, or material commitment.";
 
     private final CommunicationSession session;
     private final MessagingBackend backend;
@@ -70,6 +74,7 @@ public final class CrewMateToolRegistry {
                         session.setTarget(contact.id, contact.displayName);
                         session.setGoal(goal);
                         session.setOutcomeSummary("");
+                        session.setDelegationAuthorized(false);
                         session.setStatus(CommunicationSession.Status.THINKING);
                         notifyChanged();
                         Map<String, Object> payload = new LinkedHashMap<String, Object>();
@@ -105,7 +110,7 @@ public final class CrewMateToolRegistry {
                                         remote.outgoing ? contact.displayName : "MATE",
                                         remote.content,
                                         remote.timestamp,
-                                        remote.outgoing ? Message.Status.DELIVERED : Message.Status.RECEIVED);
+                                        remote.outgoing ? Message.Status.SENT : Message.Status.RECEIVED);
                                 session.addMessage(message);
                                 count++;
                             }
@@ -196,6 +201,7 @@ public final class CrewMateToolRegistry {
 
     private void requestSend(ToolCall call, ToolExecutor.Completion completion) {
         String content = arg(call, "content");
+        PendingSend automatic = null;
         synchronized (this) {
             if (pendingSend != null && !pendingSend.consumed) {
                 completion.complete(ToolResult.failure(call.id(), "APPROVAL_PENDING", "Another message is awaiting user approval"));
@@ -212,14 +218,27 @@ public final class CrewMateToolRegistry {
                 return;
             }
 
-            draft.updateStatus(Message.Status.PENDING_APPROVAL);
-            PendingApproval approval = new PendingApproval(call.id(), draft.id, content, APPROVAL_REASON);
-            pendingSend = new PendingSend(call, draft, approval, completion);
-            session.setPendingApproval(approval);
-            session.setStatus(CommunicationSession.Status.WAITING_FOR_APPROVAL);
+            boolean highRisk = isHighRisk(content);
+            boolean needsApproval = !session.delegationAuthorized() || highRisk;
+            if (needsApproval) {
+                draft.updateStatus(Message.Status.PENDING_APPROVAL);
+                PendingApproval approval = new PendingApproval(
+                        call.id(), draft.id, content, highRisk ? HIGH_RISK_REASON : FIRST_MESSAGE_REASON);
+                pendingSend = new PendingSend(call, draft, approval, completion);
+                session.setPendingApproval(approval);
+                session.setStatus(CommunicationSession.Status.WAITING_FOR_APPROVAL);
+                notifyChanged();
+                if (listener != null) listener.onApprovalRequired(session, approval);
+                return;
+            }
+
+            draft.updateStatus(Message.Status.SENDING);
+            session.setStatus(CommunicationSession.Status.SENDING);
+            automatic = new PendingSend(call, draft, null, completion);
+            automatic.consumed = true;
             notifyChanged();
-            if (listener != null) listener.onApprovalRequired(session, approval);
         }
+        performSend(automatic);
     }
 
     public boolean approvePending(String editedContent) {
@@ -235,28 +254,36 @@ public final class CrewMateToolRegistry {
             approved.approval.updateState(PendingApproval.State.APPROVED);
             approved.message.updateContent(content);
             approved.message.updateStatus(Message.Status.SENDING);
+            session.setDelegationAuthorized(true);
             session.setStatus(CommunicationSession.Status.SENDING);
             notifyChanged();
         }
+        performSend(approved);
+        return true;
+    }
 
+    private void performSend(final PendingSend send) {
         final MessagingBackend.Contact contact = currentContact();
         if (contact == null) {
-            failApprovedSend(approved, "CONTACT_REQUIRED", "Contact disappeared before send");
-            return true;
+            failSend(send, "CONTACT_REQUIRED", "Contact disappeared before send");
+            return;
         }
 
-        backend.sendMessage(contact, approved.message.content(), new MessagingBackend.SendCallback() {
+        backend.sendMessage(contact, send.message.content(), new MessagingBackend.SendCallback() {
             @Override public void onDelivered(String providerMessageId) {
-                approved.message.updateStatus(Message.Status.DELIVERED);
-                approved.approval.updateState(PendingApproval.State.SENT);
+                send.message.updateStatus(Message.Status.SENT);
+                if (send.approval != null) send.approval.updateState(PendingApproval.State.SENT);
                 session.setPendingApproval(null);
                 session.setStatus(CommunicationSession.Status.WAITING_FOR_REPLY);
-                synchronized (CrewMateToolRegistry.this) { pendingSend = null; }
+                synchronized (CrewMateToolRegistry.this) {
+                    if (pendingSend == send) pendingSend = null;
+                }
                 notifyChanged();
                 Map<String, Object> payload = new LinkedHashMap<String, Object>();
                 payload.put("status", "sent");
                 payload.put("provider_message_id", safe(providerMessageId));
-                approved.completion.complete(ToolResult.success(approved.call.id(), payload));
+                payload.put("delegation_authorized", session.delegationAuthorized());
+                send.completion.complete(ToolResult.success(send.call.id(), payload));
             }
 
             @Override public void onReply(MessagingBackend.RemoteMessage reply) {
@@ -270,10 +297,9 @@ public final class CrewMateToolRegistry {
             }
 
             @Override public void onError(String message) {
-                failApprovedSend(approved, "SEND_FAILED", safe(message));
+                failSend(send, "SEND_FAILED", safe(message));
             }
         });
-        return true;
     }
 
     public boolean cancelPending() {
@@ -293,14 +319,28 @@ public final class CrewMateToolRegistry {
         return true;
     }
 
-    private void failApprovedSend(PendingSend pending, String code, String message) {
-        pending.approval.updateState(PendingApproval.State.FAILED);
+    private void failSend(PendingSend pending, String code, String message) {
+        if (pending.approval != null) pending.approval.updateState(PendingApproval.State.FAILED);
         pending.message.updateStatus(Message.Status.FAILED);
         session.setPendingApproval(null);
         session.setStatus(CommunicationSession.Status.ERROR);
         synchronized (this) { if (pendingSend == pending) pendingSend = null; }
         notifyChanged();
         pending.completion.complete(ToolResult.failure(pending.call.id(), code, message));
+    }
+
+    private boolean isHighRisk(String content) {
+        String value = safe(content).toLowerCase(Locale.US);
+        String[] markers = new String[]{
+                "$", "usd", "twd", "thb", "payment", "pay ", "price", "fee", "charge", "deposit",
+                "refund", "cancel", "book ", "booking", "reserve", "purchase", "buy ", "contract",
+                "sign ", "promise", "commit", "password", "otp", "verification code", "credit card",
+                "bank transfer", "wire transfer",
+                "付款", "付費", "價格", "費用", "訂金", "退款", "取消", "預訂", "訂房", "購買",
+                "合約", "簽署", "承諾", "保證", "密碼", "驗證碼", "信用卡", "銀行", "匯款"
+        };
+        for (String marker : markers) if (value.contains(marker)) return true;
+        return false;
     }
 
     private MessagingBackend.Contact currentContact() {

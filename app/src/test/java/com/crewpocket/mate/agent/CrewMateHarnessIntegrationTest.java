@@ -82,7 +82,7 @@ public class CrewMateHarnessIntegrationTest {
     }
 
     @Test
-    public void sendMessageCannotExecuteBeforeApproval() {
+    public void firstSendCannotExecuteBeforeApproval() {
         FakeMessagingBackend backend = new FakeMessagingBackend(0L);
         CommunicationSession session = new CommunicationSession();
         CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
@@ -98,6 +98,7 @@ public class CrewMateHarnessIntegrationTest {
         assertEquals(0, backend.sendCount());
         assertEquals(0, completed.get());
         assertNotNull(session.pendingApproval());
+        assertFalse(session.delegationAuthorized());
         assertEquals(CommunicationSession.Status.WAITING_FOR_APPROVAL, session.status());
         backend.shutdown();
     }
@@ -115,7 +116,55 @@ public class CrewMateHarnessIntegrationTest {
 
         assertTrue(tools.approvePending(null));
         assertFalse(tools.approvePending(null));
+        assertTrue(session.delegationAuthorized());
         assertEquals(1, backend.sendCount());
+        backend.shutdown();
+    }
+
+    @Test
+    public void delegatedRoutineFollowupSendsWithoutSecondApproval() {
+        FakeMessagingBackend backend = new FakeMessagingBackend(5000L);
+        CommunicationSession session = new CommunicationSession();
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
+        execute(tools.registry(), call("find", "find_contact", map("query", "John", "goal", "Find a dinner time tomorrow")));
+        execute(tools.registry(), call("draft-1", "draft_message", map("content", "Are you free for dinner tomorrow?")));
+        tools.registry().execute(call("send-1", "send_message", map("content", "Are you free for dinner tomorrow?")), new ToolExecutor.Completion() {
+            @Override public void complete(ToolResult result) {}
+        });
+        assertTrue(tools.approvePending(null));
+        assertTrue(session.delegationAuthorized());
+        assertEquals(1, backend.sendCount());
+
+        execute(tools.registry(), call("draft-2", "draft_message", map("content", "Would 7 PM work?")));
+        ToolResult result = execute(tools.registry(), call("send-2", "send_message", map("content", "Would 7 PM work?")));
+        assertTrue(result.success());
+        assertNull(session.pendingApproval());
+        assertEquals(2, backend.sendCount());
+        backend.shutdown();
+    }
+
+    @Test
+    public void delegatedHighRiskFollowupStillRequiresApproval() {
+        FakeMessagingBackend backend = new FakeMessagingBackend(5000L);
+        CommunicationSession session = new CommunicationSession();
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
+        execute(tools.registry(), call("find", "find_contact", map("query", "Hotel", "goal", "Ask about late checkout options")));
+        execute(tools.registry(), call("draft-1", "draft_message", map("content", "Do you offer late checkout?")));
+        tools.registry().execute(call("send-1", "send_message", map("content", "Do you offer late checkout?")), new ToolExecutor.Completion() {
+            @Override public void complete(ToolResult result) {}
+        });
+        assertTrue(tools.approvePending(null));
+        assertTrue(session.delegationAuthorized());
+
+        execute(tools.registry(), call("draft-2", "draft_message", map("content", "Please book the $30 late checkout.")));
+        final AtomicInteger completed = new AtomicInteger();
+        tools.registry().execute(call("send-2", "send_message", map("content", "Please book the $30 late checkout.")), new ToolExecutor.Completion() {
+            @Override public void complete(ToolResult result) { completed.incrementAndGet(); }
+        });
+        assertEquals(1, backend.sendCount());
+        assertEquals(0, completed.get());
+        assertNotNull(session.pendingApproval());
+        assertEquals(CommunicationSession.Status.WAITING_FOR_APPROVAL, session.status());
         backend.shutdown();
     }
 
@@ -154,7 +203,7 @@ public class CrewMateHarnessIntegrationTest {
     public void conversationMessagesKeepInsertionOrder() {
         CommunicationSession session = new CommunicationSession();
         Message first = new Message("1", Message.Sender.USER, "MATE", "first", 1L, Message.Status.RECEIVED);
-        Message second = new Message("2", Message.Sender.MATE, "John", "second", 2L, Message.Status.DELIVERED);
+        Message second = new Message("2", Message.Sender.MATE, "John", "second", 2L, Message.Status.SENT);
         Message third = new Message("3", Message.Sender.OTHER_PERSON, "MATE", "third", 3L, Message.Status.RECEIVED);
         session.addMessage(first);
         session.addMessage(second);

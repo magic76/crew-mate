@@ -47,6 +47,17 @@ public final class SessionStore {
         return sessions.isEmpty() ? null : sessions.get(0);
     }
 
+    public synchronized CommunicationSession loadById(String sessionId) {
+        String target = sessionId == null ? "" : sessionId.trim();
+        if (target.isEmpty()) return null;
+        JSONArray array = readArray();
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject item = array.optJSONObject(i);
+            if (item != null && target.equals(item.optString("session_id"))) return fromJson(item);
+        }
+        return null;
+    }
+
     public synchronized List<CommunicationSession> loadAll() {
         List<CommunicationSession> sessions = new ArrayList<CommunicationSession>();
         JSONArray array = readArray();
@@ -65,11 +76,8 @@ public final class SessionStore {
     }
 
     private JSONArray readArray() {
-        try {
-            return new JSONArray(preferences.getString(KEY_SESSIONS, "[]"));
-        } catch (Exception ignored) {
-            return new JSONArray();
-        }
+        try { return new JSONArray(preferences.getString(KEY_SESSIONS, "[]")); }
+        catch (Exception ignored) { return new JSONArray(); }
     }
 
     private static JSONObject toJson(CommunicationSession session) throws Exception {
@@ -79,6 +87,7 @@ public final class SessionStore {
         root.put("target_person_id", session.targetPersonId());
         root.put("goal", session.goal());
         root.put("outcome_summary", session.outcomeSummary());
+        root.put("delegation_authorized", session.delegationAuthorized());
         root.put("status", session.status().name());
         root.put("pending_user_question", session.pendingUserQuestion());
         root.put("updated_at", session.updatedAt());
@@ -104,6 +113,7 @@ public final class SessionStore {
             session.setTarget(root.optString("target_person_id"), root.optString("target_person"));
             session.setGoal(root.optString("goal"));
             session.setOutcomeSummary(root.optString("outcome_summary"));
+            session.setDelegationAuthorized(root.optBoolean("delegation_authorized", false));
             session.setPendingUserQuestion(root.optString("pending_user_question"));
 
             JSONArray messages = root.optJSONArray("messages");
@@ -113,24 +123,17 @@ public final class SessionStore {
                     if (item == null) continue;
                     Message.Sender sender = enumValue(Message.Sender.class, item.optString("sender"), Message.Sender.SYSTEM);
                     Message.Status status = enumValue(Message.Status.class, item.optString("status"), Message.Status.INFO);
-                    // A process restart must never preserve authority to send. Keep the text as a visible draft.
-                    if (status == Message.Status.PENDING_APPROVAL || status == Message.Status.SENDING) {
-                        status = Message.Status.DRAFT;
-                    }
+                    // A restart never preserves authority for a concrete pending send. The broader
+                    // task delegation can persist, but this exact draft must be reconsidered.
+                    if (status == Message.Status.PENDING_APPROVAL || status == Message.Status.SENDING) status = Message.Status.DRAFT;
                     session.addMessage(new Message(
-                            item.optString("id"),
-                            sender,
-                            item.optString("recipient"),
-                            item.optString("content"),
-                            item.optLong("timestamp", System.currentTimeMillis()),
-                            status));
+                            item.optString("id"), sender, item.optString("recipient"), item.optString("content"),
+                            item.optLong("timestamp", System.currentTimeMillis()), status));
                 }
             }
 
             CommunicationSession.Status restoredStatus = enumValue(
-                    CommunicationSession.Status.class,
-                    root.optString("status"),
-                    CommunicationSession.Status.STOPPED);
+                    CommunicationSession.Status.class, root.optString("status"), CommunicationSession.Status.STOPPED);
             if (restoredStatus == CommunicationSession.Status.WAITING_FOR_APPROVAL
                     || restoredStatus == CommunicationSession.Status.SENDING
                     || restoredStatus == CommunicationSession.Status.THINKING) {
@@ -140,16 +143,11 @@ public final class SessionStore {
             session.setPendingApproval(null);
             session.setUpdatedAtForRestore(root.optLong("updated_at", session.updatedAt()));
             return session;
-        } catch (Exception ignored) {
-            return null;
-        }
+        } catch (Exception ignored) { return null; }
     }
 
     private static <T extends Enum<T>> T enumValue(Class<T> type, String value, T fallback) {
-        try {
-            return Enum.valueOf(type, value == null ? "" : value);
-        } catch (Exception ignored) {
-            return fallback;
-        }
+        try { return Enum.valueOf(type, value == null ? "" : value); }
+        catch (Exception ignored) { return fallback; }
     }
 }

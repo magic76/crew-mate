@@ -47,9 +47,22 @@ public interface MessagingBackend {
         void onError(String message);
     }
 
+    interface IncomingCallback {
+        void onMessage(RemoteMessage message);
+        void onError(String message);
+    }
+
     void findContact(String query, FindCallback callback);
     void getConversation(Contact contact, ConversationCallback callback);
     void sendMessage(Contact contact, String content, SendCallback callback);
+
+    /**
+     * Observe the next inbound message for one contact after a known timestamp. Providers that
+     * support background continuation should override this. The shared agent harness is not involved.
+     */
+    default void watchIncoming(Contact contact, long afterTimestamp, IncomingCallback callback) {
+        if (callback != null) callback.onError("This messaging provider does not support background reply watching.");
+    }
 
     /** Stop provider polling/background resources owned by this backend instance. */
     default void shutdown() {}
