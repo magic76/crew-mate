@@ -11,19 +11,29 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://jitpack.io' }
     }
 }
 
 rootProject.name = "CrewMate"
 include ':app'
 
-// Crew Mate is the first external consumer of the shared Crew Agent Harness.
-// Expected local workspace layout:
+// Production/CI resolves Crew Agent Harness from JitPack.
+// For local Harness development only, opt in explicitly:
+//   gradle -PcrewHarnessLocal=true :app:testDebugUnitTest :app:assembleDebug
+// Expected optional workspace layout:
 // workspace/
 // ├── crew-agent-harness/
 // └── crew-mate/
-includeBuild('../crew-agent-harness') {
-    dependencySubstitution {
-        substitute module('com.magic76.crew:agent-core') using project(':agent-core')
+def localHarness = file('../crew-agent-harness')
+def useLocalHarness = gradle.startParameter.projectProperties.get('crewHarnessLocal') == 'true'
+if (useLocalHarness) {
+    if (!localHarness.exists()) {
+        throw new GradleException("-PcrewHarnessLocal=true requires ../crew-agent-harness")
+    }
+    includeBuild(localHarness) {
+        dependencySubstitution {
+            substitute module('com.github.magic76:crew-agent-harness') using project(':agent-core')
+        }
     }
 }
