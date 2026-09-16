@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, milestone-c-final ]
   pull_request:
     branches: [ main ]
 
