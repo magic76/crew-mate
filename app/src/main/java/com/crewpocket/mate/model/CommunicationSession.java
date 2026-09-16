@@ -12,6 +12,7 @@ public final class CommunicationSession {
         WAITING_FOR_APPROVAL,
         SENDING,
         WAITING_FOR_REPLY,
+        REPLY_RECEIVED,
         NEEDS_USER_INPUT,
         COMPLETED,
         STOPPED,
@@ -29,9 +30,7 @@ public final class CommunicationSession {
     private String pendingUserQuestion = "";
     private long updatedAt = System.currentTimeMillis();
 
-    public CommunicationSession() {
-        this(UUID.randomUUID().toString());
-    }
+    public CommunicationSession() { this(UUID.randomUUID().toString()); }
 
     public CommunicationSession(String sessionId) {
         this.sessionId = clean(sessionId).isEmpty() ? UUID.randomUUID().toString() : clean(sessionId);
@@ -52,51 +51,27 @@ public final class CommunicationSession {
         touch();
     }
 
-    public synchronized void setGoal(String value) {
-        goal = clean(value);
-        touch();
-    }
-
-    public synchronized void setOutcomeSummary(String value) {
-        outcomeSummary = clean(value);
-        touch();
-    }
+    public synchronized void setGoal(String value) { goal = clean(value); touch(); }
+    public synchronized void setOutcomeSummary(String value) { outcomeSummary = clean(value); touch(); }
 
     public synchronized void setStatus(Status value) {
-        if (value != null) {
-            status = value;
-            touch();
-        }
+        if (value != null) { status = value; touch(); }
     }
 
-    public synchronized void setPendingApproval(PendingApproval value) {
-        pendingApproval = value;
-        touch();
-    }
-
-    public synchronized void setPendingUserQuestion(String value) {
-        pendingUserQuestion = clean(value);
-        touch();
-    }
-
-    public synchronized void setUpdatedAtForRestore(long value) {
-        if (value > 0) updatedAt = value;
-    }
+    public synchronized void setPendingApproval(PendingApproval value) { pendingApproval = value; touch(); }
+    public synchronized void setPendingUserQuestion(String value) { pendingUserQuestion = clean(value); touch(); }
+    public synchronized void setUpdatedAtForRestore(long value) { if (value > 0) updatedAt = value; }
 
     public synchronized void addMessage(Message message) {
         if (message == null) return;
-        for (Message existing : messages) {
-            if (existing.id.equals(message.id)) return;
-        }
+        for (Message existing : messages) if (existing.id.equals(message.id)) return;
         messages.add(message);
         updatedAt = Math.max(System.currentTimeMillis(), message.timestamp);
     }
 
     public synchronized Message findMessage(String id) {
         if (id == null) return null;
-        for (Message message : messages) {
-            if (id.equals(message.id)) return message;
-        }
+        for (Message message : messages) if (id.equals(message.id)) return message;
         return null;
     }
 
@@ -105,9 +80,7 @@ public final class CommunicationSession {
             Message message = messages.get(i);
             if (message.sender == Message.Sender.MATE
                     && (message.status() == Message.Status.DRAFT
-                    || message.status() == Message.Status.PENDING_APPROVAL)) {
-                return message;
-            }
+                    || message.status() == Message.Status.PENDING_APPROVAL)) return message;
         }
         return null;
     }
@@ -116,11 +89,6 @@ public final class CommunicationSession {
         return Collections.unmodifiableList(new ArrayList<Message>(messages));
     }
 
-    private void touch() {
-        updatedAt = System.currentTimeMillis();
-    }
-
-    private static String clean(String value) {
-        return value == null ? "" : value.trim();
-    }
+    private void touch() { updatedAt = System.currentTimeMillis(); }
+    private static String clean(String value) { return value == null ? "" : value.trim(); }
 }
