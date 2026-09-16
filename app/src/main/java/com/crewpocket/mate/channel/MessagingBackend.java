@@ -2,7 +2,7 @@ package com.crewpocket.mate.channel;
 
 import java.util.List;
 
-/** Provider boundary. Telegram/LINE/email adapters can implement this later. */
+/** Provider boundary. Telegram/LINE/email adapters implement this without changing the agent loop. */
 public interface MessagingBackend {
     final class Contact {
         public final String id;
@@ -49,4 +49,7 @@ public interface MessagingBackend {
     void findContact(String query, FindCallback callback);
     void getConversation(Contact contact, ConversationCallback callback);
     void sendMessage(Contact contact, String content, SendCallback callback);
+
+    /** Stop provider polling/background resources owned by this backend instance. */
+    default void shutdown() {}
 }
