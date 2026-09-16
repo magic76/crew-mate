@@ -34,4 +34,21 @@ public class TurnTextAccumulatorTest {
         accumulator.append("!");
         assertEquals("Sounds good!", accumulator.take());
     }
+
+    @Test
+    public void cumulativePartialTranscriptReplacesEarlierPartial() {
+        TurnTextAccumulator accumulator = new TurnTextAccumulator();
+        accumulator.append("幫我問 John");
+        accumulator.append("幫我問 John 明天晚上");
+        accumulator.append("幫我問 John 明天晚上有沒有空");
+        assertEquals("幫我問 John 明天晚上有沒有空", accumulator.take());
+    }
+
+    @Test
+    public void overlappingChunksDoNotDuplicateText() {
+        TurnTextAccumulator accumulator = new TurnTextAccumulator();
+        accumulator.append("hello wor");
+        accumulator.append("world!");
+        assertEquals("hello world!", accumulator.take());
+    }
 }
