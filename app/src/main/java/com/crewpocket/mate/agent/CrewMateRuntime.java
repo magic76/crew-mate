@@ -73,6 +73,35 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         harness.submitText(value);
     }
 
+    /** Rehydrates model context after a background reply without creating a fake private user message. */
+    public void resumePersistedTask() {
+        if (closed) return;
+        StringBuilder context = new StringBuilder();
+        context.append("RESUME_DELEGATED_COMMUNICATION_TASK\n")
+                .append("Target: ").append(session.targetPerson()).append("\n")
+                .append("Goal: ").append(session.goal()).append("\n")
+                .append("Delegated: ").append(session.delegationAuthorized()).append("\n")
+                .append("Recent context:\n");
+        List<Message> messages = session.messages();
+        int start = Math.max(0, messages.size() - 16);
+        for (int i = start; i < messages.size(); i++) {
+            Message message = messages.get(i);
+            if (message.sender == Message.Sender.USER) {
+                context.append("PRIVATE_USER_BRIEF: ").append(message.content()).append("\n");
+            } else if (message.sender == Message.Sender.OTHER_PERSON) {
+                context.append("OTHER_PERSON: ").append(message.content()).append("\n");
+            } else if (message.sender == Message.Sender.MATE && !"USER".equals(message.recipient)) {
+                context.append("MATE_TO_OTHER: ").append(message.content()).append("\n");
+            }
+        }
+        context.append("Continue the delegated task yourself if the next step is routine and within scope. "
+                + "If a new consequential decision is required, call request_user_input. "
+                + "If the goal is achieved, call complete_task.");
+        session.setStatus(CommunicationSession.Status.THINKING);
+        notifyChanged();
+        harness.submitText(context.toString());
+    }
+
     /** Input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
         if (closed) return;
@@ -160,7 +189,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         emitStatus("Thinking");
         String person = changed.targetPerson().isEmpty() ? "OTHER_PERSON" : changed.targetPerson();
         harness.submitText("EXTERNAL_MESSAGE from " + person + ": " + message.content()
-                + "\nContinue only within the user's stated goal. If the goal is now achieved, call complete_task. If a new decision is needed, call request_user_input.");
+                + "\nThis is a delegated communication task. Continue the conversation yourself when the next step is routine and within the approved goal. "
+                + "If the goal is achieved, call complete_task. If a new consequential decision is needed, call request_user_input.");
     }
 
     @Override
@@ -184,9 +214,10 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
             case WAITING_FOR_APPROVAL: return "Waiting for approval";
             case SENDING: return "Sending";
             case WAITING_FOR_REPLY: return "Waiting for reply";
+            case REPLY_RECEIVED: return "Reply received";
             case NEEDS_USER_INPUT: return "Needs your input";
             case COMPLETED: return "Completed";
-            case STOPPED: return "Stopped";
+            case STOPPED: return "Paused";
             case ERROR: return "Error";
             default: return "Thinking";
         }
