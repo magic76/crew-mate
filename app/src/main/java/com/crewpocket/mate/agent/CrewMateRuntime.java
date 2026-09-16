@@ -102,6 +102,18 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         harness.submitText(context.toString());
     }
 
+    /** Feed a provider watch reply into the same shared Harness runtime; never starts a second loop. */
+    public void acceptExternalReply(MessagingBackend.RemoteMessage reply) {
+        if (closed || reply == null || reply.outgoing) return;
+        if (!reply.id.isEmpty() && session.findMessage(reply.id) != null) return;
+        Message message = new Message(reply.id, Message.Sender.OTHER_PERSON, "MATE",
+                reply.content, reply.timestamp, Message.Status.RECEIVED);
+        session.addMessage(message);
+        session.setStatus(CommunicationSession.Status.THINKING);
+        notifyChanged();
+        onExternalReply(session, message);
+    }
+
     /** Input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
         if (closed) return;
