@@ -86,15 +86,12 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
                 modelTurn.append(event.text());
                 break;
             case TOOL_REQUESTED:
-                // Some providers request a tool before emitting TURN_COMPLETED. Preserve any
-                // already-spoken text as one message instead of leaving it invisible.
                 commitModelTurn();
                 break;
             case STARTED:
                 emitStatus("Thinking");
                 break;
             case INTERRUPTED:
-                // Interrupted model speech is intentionally not persisted as a completed message.
                 modelTurn.clear();
                 emitStatus("Interrupted");
                 break;
@@ -104,15 +101,19 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
                 break;
             case STOPPED:
                 modelTurn.clear();
-                session.setStatus(CommunicationSession.Status.STOPPED);
+                if (session.status() != CommunicationSession.Status.COMPLETED) {
+                    session.setStatus(CommunicationSession.Status.STOPPED);
+                }
                 notifyChanged();
-                emitStatus("Stopped");
+                emitStatus(displayStatus(session.status()));
                 break;
             case ERROR:
                 modelTurn.clear();
-                session.setStatus(CommunicationSession.Status.ERROR);
+                if (session.status() != CommunicationSession.Status.COMPLETED) {
+                    session.setStatus(CommunicationSession.Status.ERROR);
+                }
                 notifyChanged();
-                emitStatus("Error");
+                emitStatus(displayStatus(session.status()));
                 break;
             default:
                 break;
@@ -141,7 +142,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         emitStatus("Thinking");
         String person = changed.targetPerson().isEmpty() ? "OTHER_PERSON" : changed.targetPerson();
         harness.submitText("EXTERNAL_MESSAGE from " + person + ": " + message.content()
-                + "\nContinue only within the user's stated goal. If a new decision is needed, call request_user_input.");
+                + "\nContinue only within the user's stated goal. If the goal is now achieved, call complete_task. If a new decision is needed, call request_user_input.");
     }
 
     @Override
