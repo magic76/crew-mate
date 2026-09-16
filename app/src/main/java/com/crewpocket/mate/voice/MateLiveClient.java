@@ -127,6 +127,7 @@ public class MateLiveClient {
         return running;
     }
 
+    /** Pushes hidden runtime context such as an external contact reply into the live session. */
     public boolean pushContext(String text) {
         if (!running || !setupReady || webSocket == null || text == null || text.trim().isEmpty()) return false;
         try {
@@ -138,17 +139,17 @@ public class MateLiveClient {
         }
     }
 
+    /** Matches the working tool-response envelope already used by Crew Teacher. */
     public boolean sendToolResponse(String id, String name, JSONObject result) {
         if (!running || webSocket == null) return false;
         try {
-            JSONObject response = new JSONObject();
-            response.put("id", id == null || id.isEmpty() ? "call_0" : id);
-            response.put("name", name == null ? "" : name);
-            response.put("response", result == null ? new JSONObject().put("ok", true) : result);
-
-            JSONObject root = new JSONObject();
-            root.put("toolResponse", new JSONObject()
-                    .put("functionResponses", new JSONArray().put(response)));
+            JSONObject item = new JSONObject()
+                    .put("response", new JSONObject().put("result",
+                            result == null ? new JSONObject().put("ok", true) : result))
+                    .put("id", id == null || id.isEmpty() ? "call_0" : id)
+                    .put("name", name == null ? "" : name);
+            JSONObject root = new JSONObject().put("toolResponse",
+                    new JSONObject().put("functionResponses", new JSONArray().put(item)));
             return webSocket.send(root.toString());
         } catch (Exception e) {
             listener.onError("Unable to send tool result: " + e.getMessage());
@@ -174,7 +175,6 @@ public class MateLiveClient {
                 new JSONArray().put(new JSONObject().put("text", systemPrompt()))));
         setup.put("tools", new JSONArray().put(new JSONObject()
                 .put("functionDeclarations", toolDeclarations())));
-
         return new JSONObject().put("setup", setup);
     }
 
@@ -186,37 +186,40 @@ public class MateLiveClient {
         createProps.put("goal", schema("STRING", "The concrete outcome the user wants."));
         createProps.put("private_context", new JSONObject()
                 .put("type", "ARRAY")
-                .put("description", "Private preferences or constraints that must never be exposed verbatim unless needed.")
+                .put("description", "Private preferences or constraints that should not be exposed verbatim unless needed.")
                 .put("items", schema("STRING", "One private constraint.")));
-        tools.put(declaration("create_task", "Create a communication task after the user asks Crew Mate to handle communication.", createProps,
-                new JSONArray().put("contact").put("goal")));
+        tools.put(declaration("create_task",
+                "Create a communication task after the user asks Crew Mate to handle communication.",
+                createProps, new JSONArray().put("contact").put("goal")));
 
         JSONObject contextProps = new JSONObject();
         contextProps.put("context", schema("STRING", "New private instruction, preference, or constraint from the user."));
-        tools.put(declaration("update_task_context", "Add private context to the active task.", contextProps,
-                new JSONArray().put("context")));
+        tools.put(declaration("update_task_context", "Add private context to the active task.",
+                contextProps, new JSONArray().put("context")));
 
         JSONObject draftProps = new JSONObject();
         draftProps.put("text", schema("STRING", "The exact message Crew Mate proposes to send externally."));
-        tools.put(declaration("draft_message", "Prepare an external message before sending it.", draftProps,
-                new JSONArray().put("text")));
+        tools.put(declaration("draft_message", "Prepare an external message before sending it.",
+                draftProps, new JSONArray().put("text")));
 
         JSONObject sendProps = new JSONObject();
         sendProps.put("text", schema("STRING", "The exact external message to send."));
-        sendProps.put("user_approved", schema("BOOLEAN", "True only after the user explicitly approved a blocked high-risk message."));
-        tools.put(declaration("send_message", "Send a message to the active task contact. The app Decision Gate may block it.", sendProps,
-                new JSONArray().put("text")));
+        sendProps.put("user_approved", schema("BOOLEAN",
+                "True only after the user explicitly approved a blocked high-risk message."));
+        tools.put(declaration("send_message",
+                "Send a message to the active task contact. The app Decision Gate may block it.",
+                sendProps, new JSONArray().put("text")));
 
         JSONObject askProps = new JSONObject();
         askProps.put("question", schema("STRING", "The concise question Crew Mate needs the user to answer."));
         askProps.put("reason", schema("STRING", "Why the decision cannot safely be made from existing context."));
-        tools.put(declaration("ask_user", "Pause the external task when a new user decision is required.", askProps,
-                new JSONArray().put("question")));
+        tools.put(declaration("ask_user", "Pause the external task when a new user decision is required.",
+                askProps, new JSONArray().put("question")));
 
         JSONObject completeProps = new JSONObject();
         completeProps.put("summary", schema("STRING", "Short outcome summary including commitments and next steps."));
-        tools.put(declaration("complete_task", "Finish the task only after its goal is actually achieved.", completeProps,
-                new JSONArray().put("summary")));
+        tools.put(declaration("complete_task", "Finish the task only after its goal is actually achieved.",
+                completeProps, new JSONArray().put("summary")));
         return tools;
     }
 
@@ -354,9 +357,14 @@ public class MateLiveClient {
 
         int minInput = AudioRecord.getMinBufferSize(INPUT_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        int inputBuffer = Math.max(minInput, 6400);
-        recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, inputBuffer);
+        int inputBuffer = Math.max(minInput * 4, 8192);
+        try {
+            recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, inputBuffer);
+        } catch (Exception first) {
+            recorder = new AudioRecord(MediaRecorder.AudioSource.MIC,
+                    INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, inputBuffer);
+        }
 
         int minOutput = AudioTrack.getMinBufferSize(OUTPUT_RATE,
                 AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -370,7 +378,7 @@ public class MateLiveClient {
                         .setSampleRate(OUTPUT_RATE)
                         .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                         .build())
-                .setBufferSizeInBytes(Math.max(minOutput, 9600))
+                .setBufferSizeInBytes(Math.max(minOutput * 4, 24000))
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build();
         player.play();
