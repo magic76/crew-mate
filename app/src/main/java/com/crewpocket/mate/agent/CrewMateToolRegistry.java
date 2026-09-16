@@ -69,6 +69,7 @@ public final class CrewMateToolRegistry {
                     @Override public void onFound(MessagingBackend.Contact contact) {
                         session.setTarget(contact.id, contact.displayName);
                         session.setGoal(goal);
+                        session.setOutcomeSummary("");
                         session.setStatus(CommunicationSession.Status.THINKING);
                         notifyChanged();
                         Map<String, Object> payload = new LinkedHashMap<String, Object>();
@@ -167,6 +168,30 @@ public final class CrewMateToolRegistry {
                 completion.complete(ToolResult.success(call.id(), payload));
             }
         });
+
+        registry.register("complete_task", new ToolExecutor() {
+            @Override public void execute(ToolCall call, Completion completion) {
+                String summary = arg(call, "summary");
+                if (summary.isEmpty()) {
+                    completion.complete(ToolResult.failure(call.id(), "SUMMARY_REQUIRED", "Outcome summary is empty"));
+                    return;
+                }
+                synchronized (CrewMateToolRegistry.this) {
+                    if (pendingSend != null && !pendingSend.consumed) {
+                        completion.complete(ToolResult.failure(call.id(), "APPROVAL_PENDING", "Cannot complete while an outbound message awaits approval"));
+                        return;
+                    }
+                }
+                session.setOutcomeSummary(summary);
+                session.setPendingUserQuestion("");
+                session.setStatus(CommunicationSession.Status.COMPLETED);
+                notifyChanged();
+                Map<String, Object> payload = new LinkedHashMap<String, Object>();
+                payload.put("status", "completed");
+                payload.put("summary", summary);
+                completion.complete(ToolResult.success(call.id(), payload));
+            }
+        });
     }
 
     private void requestSend(ToolCall call, ToolExecutor.Completion completion) {
@@ -194,8 +219,6 @@ public final class CrewMateToolRegistry {
             session.setStatus(CommunicationSession.Status.WAITING_FOR_APPROVAL);
             notifyChanged();
             if (listener != null) listener.onApprovalRequired(session, approval);
-            // Deliberately do not complete the tool call here. The harness remains waiting
-            // until the human explicitly approves or cancels this exact pending send.
         }
     }
 
