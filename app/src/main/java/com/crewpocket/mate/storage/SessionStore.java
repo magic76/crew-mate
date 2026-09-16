@@ -87,6 +87,7 @@ public final class SessionStore {
         root.put("target_person_id", session.targetPersonId());
         root.put("goal", session.goal());
         root.put("outcome_summary", session.outcomeSummary());
+        root.put("delegation_authorized", session.delegationAuthorized());
         root.put("status", session.status().name());
         root.put("pending_user_question", session.pendingUserQuestion());
         root.put("updated_at", session.updatedAt());
@@ -112,6 +113,7 @@ public final class SessionStore {
             session.setTarget(root.optString("target_person_id"), root.optString("target_person"));
             session.setGoal(root.optString("goal"));
             session.setOutcomeSummary(root.optString("outcome_summary"));
+            session.setDelegationAuthorized(root.optBoolean("delegation_authorized", false));
             session.setPendingUserQuestion(root.optString("pending_user_question"));
 
             JSONArray messages = root.optJSONArray("messages");
@@ -121,6 +123,8 @@ public final class SessionStore {
                     if (item == null) continue;
                     Message.Sender sender = enumValue(Message.Sender.class, item.optString("sender"), Message.Sender.SYSTEM);
                     Message.Status status = enumValue(Message.Status.class, item.optString("status"), Message.Status.INFO);
+                    // A restart never preserves authority for a concrete pending send. The broader
+                    // task delegation can persist, but this exact draft must be reconsidered.
                     if (status == Message.Status.PENDING_APPROVAL || status == Message.Status.SENDING) status = Message.Status.DRAFT;
                     session.addMessage(new Message(
                             item.optString("id"), sender, item.optString("recipient"), item.optString("content"),
