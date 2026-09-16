@@ -144,7 +144,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
                 break;
             case STOPPED:
                 modelTurn.clear();
-                if (session.status() != CommunicationSession.Status.COMPLETED) {
+                if (!preserveProductStateOnRuntimeStop(session.status())) {
                     session.setStatus(CommunicationSession.Status.STOPPED);
                 }
                 notifyChanged();
@@ -161,6 +161,14 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
             default:
                 break;
         }
+    }
+
+    private boolean preserveProductStateOnRuntimeStop(CommunicationSession.Status status) {
+        return status == CommunicationSession.Status.WAITING_FOR_REPLY
+                || status == CommunicationSession.Status.REPLY_RECEIVED
+                || status == CommunicationSession.Status.NEEDS_USER_INPUT
+                || status == CommunicationSession.Status.WAITING_FOR_APPROVAL
+                || status == CommunicationSession.Status.COMPLETED;
     }
 
     private void commitModelTurn() {
