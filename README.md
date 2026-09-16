@@ -61,9 +61,33 @@ CommunicationSession / Approval Policy / MessagingBackend
 
 `GeminiLiveModelSession` adapts the realtime Gemini transport to the provider-neutral `ModelSession` contract. Provider-specific transport does not enter the shared Harness.
 
+## Task-first secretary UX
+
+Crew Mate is intentionally not a generic AI chat screen.
+
+The main flow is:
+
+```text
+User privately briefs Mate
+    ↓
+Mate resolves the target person and goal
+    ↓
+User approves the first external message
+    ↓
+Mate carries routine in-goal conversation forward
+    ↓
+User watches the complete external timeline
+    ↓
+Mate returns only for a consequential decision or approval
+    ↓
+Mate completes the task with an outcome
+```
+
+The home screen focuses on handing off a task. API keys and provider controls live under Settings. Once a task exists, the external `Mate ↔ other person` conversation is the primary surface; the private `User ↔ Mate` brief is visually secondary and never copied verbatim to the other person.
+
 ## Delegated secretary behavior
 
-Crew Mate is not intended to behave like a normal AI chat screen. The user first privately briefs Mate with a person, desired outcome, preferences, and constraints. Mate then carries the external conversation forward while the app exposes the complete `Mate ↔ other person` timeline.
+The user first privately briefs Mate with a person, desired outcome, preferences, and constraints. Mate then carries the external conversation forward while the app exposes the complete `Mate ↔ other person` timeline.
 
 The first outbound message is user-approved. After that first approval, the task becomes delegated and routine follow-ups within the same goal can continue automatically. Messages involving payment, cancellation, booking, contracts, sensitive information, or other material commitments return to the user for approval or a decision.
 
@@ -116,7 +140,11 @@ Communication sessions are persisted locally. A restart never restores authority
 
 ## Background continuity
 
-For delegated Telegram tasks waiting for a reply, Crew Mate is adding a short-lived Android foreground continuation service. The service does **not** run another agent loop or keep Gemini Live running. It captures the next external reply, persists it into the existing `CommunicationSession`, notifies the user, and stops. When the user returns, the same shared `AgentHarness` runtime resumes the task.
+For a delegated Telegram task in `WAITING_FOR_REPLY`, ending the voice runtime hands the task to a short-lived Android foreground continuation service.
+
+The service does **not** run another agent loop and does not keep Gemini Live running. It only watches the target Telegram chat for the next inbound reply, persists that reply into the existing `CommunicationSession`, posts a notification, and stops. Opening that notification restores the exact task. When the user resumes Mate, the same shared `AgentHarness` runtime is rehydrated from the persisted task and conversation state.
+
+The voice runtime must not overwrite `WAITING_FOR_REPLY`, `REPLY_RECEIVED`, `NEEDS_USER_INPUT`, `WAITING_FOR_APPROVAL`, or `COMPLETED` merely because the realtime model session stopped.
 
 ## Trace privacy
 
@@ -130,7 +158,7 @@ CI resolves the remote Harness directly and runs:
 gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace
 ```
 
-The test suite covers shared-Harness integration, tool allowlisting, call-id preservation, duplicate completion suppression, approval boundaries, conversation ordering, trace privacy, turn aggregation, completed outcomes, and fake end-to-end communication.
+The test suite covers shared-Harness integration, tool allowlisting, call-id preservation, duplicate completion suppression, delegated approval boundaries, conversation ordering, trace privacy, turn aggregation, completed outcomes, runtime shutdown state preservation, and fake end-to-end communication.
 
 ## Run locally
 
