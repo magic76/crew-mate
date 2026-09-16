@@ -76,15 +76,16 @@ CommunicationSession / Approval Policy / MessagingBackend
 
 ## Crew Mate tools
 
-`CrewMateAgentSpec` exposes exactly these first-version tools:
+`CrewMateAgentSpec` exposes:
 
 - `find_contact`
 - `get_conversation`
 - `draft_message`
 - `send_message`
 - `request_user_input`
+- `complete_task`
 
-Unknown tools are rejected by `AgentHarness`.
+`complete_task` stores a concise outcome summary and marks the product session `COMPLETED`. Unknown tools are rejected by `AgentHarness`.
 
 ## Communication state
 
@@ -99,14 +100,9 @@ Each `Message` stores:
 - `timestamp`
 - `status`
 
-Senders are:
+Senders are `USER`, `MATE`, `OTHER_PERSON`, and `SYSTEM`.
 
-- `USER`
-- `MATE`
-- `OTHER_PERSON`
-- `SYSTEM`
-
-The UI separates the private `You ↔ Mate` conversation from the external `Mate ↔ other person` timeline.
+The UI separates the private `You ↔ Mate` conversation from the external `Mate ↔ other person` timeline. Completed tasks keep their factual `outcomeSummary` even after the realtime voice runtime stops.
 
 ## Approval policy
 
@@ -118,29 +114,33 @@ When the model requests `send_message`, `CrewMateToolRegistry` creates `PendingA
 
 There is no model-provided `user_approved` flag and no model-only path around the authorization boundary. A pending approval can be consumed once, preventing duplicate sends.
 
-## Fake end-to-end flow
+## Messaging providers
 
-The first provider is `FakeMessagingBackend`:
+The app currently supports two provider modes behind the same `MessagingBackend` contract.
 
-```text
-User: 幫我問 John 明天晚上有沒有空吃飯
-        ↓
-find_contact
-        ↓
-draft_message
-        ↓
-send_message
-        ↓
-WAITING_FOR_APPROVAL
-        ↓ user approves
-fake send
-        ↓
-John: 明天 7 點可以。
-        ↓
-EXTERNAL_MESSAGE injected back through AgentHarness
-```
+### Fake
 
-A real Telegram/LINE/email implementation only needs to replace `MessagingBackend`; it does not change `AgentHarness` or `CrewMateAgentSpec` orchestration.
+`FakeMessagingBackend` is the deterministic local end-to-end test provider. No real external message leaves the device.
+
+### Telegram Bot API MVP
+
+`TelegramMessagingBackend` is the first real provider. Enter a Bot API token in the app and switch the provider from **Fake** to **Telegram**.
+
+Important Telegram constraints:
+
+- A bot cannot initiate a private conversation with an arbitrary Telegram user.
+- The target person must first open the Crew Mate bot and send `/start` (or another message).
+- Crew Mate learns those contacts from Bot API updates and can then resolve them by display name, `@username`, or Telegram chat id.
+- Telegram Bot API does not provide arbitrary private-chat history. `get_conversation` therefore returns messages that this Crew Mate provider has locally observed and cached.
+- The current Telegram implementation uses foreground long polling. If the voice/runtime session ends, the provider polling stops. Background receiving/webhooks are a later milestone.
+
+The same `ALWAYS_ASK` approval boundary applies to Telegram sends. Selecting Telegram never gives the model direct send authority.
+
+## Voice turn aggregation and persistence
+
+Gemini Live transcription/model deltas are aggregated into complete human-readable turns before being written into the conversation UI. Interrupted Mate speech is discarded rather than persisted as a misleading half-message.
+
+Communication sessions are persisted locally. Restarting the app restores history, but never restores send authorization: pending/sending messages become drafts after process restart.
 
 ## Trace privacy
 
@@ -159,17 +159,7 @@ Trace entries include session id, tool name, call id, success/failure, and durat
 
 ## Tests
 
-`CrewMateHarnessIntegrationTest` covers:
-
-- AgentSpec tool exposure
-- undeclared tool rejection by the shared harness
-- ToolResult call-id preservation
-- duplicate completion suppression
-- no send before approval
-- approved message sends only once
-- conversation ordering
-- trace privacy
-- fake John end-to-end flow
+The JVM test suite covers shared-harness integration, tool allowlisting, call-id preservation, duplicate completion suppression, approval gating, exactly-once sends, conversation ordering, trace privacy, voice-turn aggregation, fake end-to-end communication, and completed task outcomes.
 
 CI checks out `crew-agent-harness` at the pinned commit as a sibling and runs:
 
@@ -185,16 +175,18 @@ From `crew-mate/`, with the sibling harness present:
 gradle :app:testDebugUnitTest :app:assembleDebug
 ```
 
-Then install the debug APK normally with Android Studio or ADB. On launch, enter a Gemini API key, grant microphone permission, and start a voice session.
+Then install the debug APK with Android Studio or ADB. On launch:
 
-## Next provider milestone
+1. Enter a Gemini API key.
+2. Choose **Fake** for local simulation, or **Telegram** and enter a Bot API token.
+3. For Telegram, have the target person send `/start` to your bot once.
+4. Grant microphone permission and start a voice session.
+5. Every real outbound message still appears as a pending approval before it can be sent.
 
-To connect a real messaging provider, implement only:
+## Next milestones
 
-1. contact lookup in `MessagingBackend.findContact`
-2. thread fetch in `MessagingBackend.getConversation`
-3. actual send + inbound reply delivery in `MessagingBackend.sendMessage`
-4. provider authentication/account setup
-5. stable provider message/contact IDs for deduplication
-
-The shared agent loop and approval boundary should remain unchanged.
+- Android foreground/background service for communication tasks that outlive the voice screen.
+- Telegram background receive or webhook relay so replies can resume tasks when the app is not open.
+- Contacts/person identity layer across multiple providers.
+- Calendar/reminder follow-up from completed task outcomes.
+- Additional providers such as email, LINE, and WhatsApp where their platform constraints fit Crew Mate's delegation model.
