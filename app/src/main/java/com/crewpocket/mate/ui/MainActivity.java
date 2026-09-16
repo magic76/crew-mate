@@ -24,6 +24,8 @@ import android.widget.Toast;
 
 import com.crewpocket.mate.agent.CrewMateRuntime;
 import com.crewpocket.mate.channel.FakeMessagingBackend;
+import com.crewpocket.mate.channel.MessagingBackend;
+import com.crewpocket.mate.channel.TelegramMessagingBackend;
 import com.crewpocket.mate.config.AppConfig;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
@@ -55,6 +57,9 @@ public class MainActivity extends Activity {
     };
 
     private EditText apiKeyInput;
+    private EditText telegramTokenInput;
+    private Button providerButton;
+    private TextView providerHint;
     private Button voiceButton;
     private TextView statusText;
     private TextView taskText;
@@ -67,7 +72,7 @@ public class MainActivity extends Activity {
 
     private CrewMateRuntime runtime;
     private GeminiLiveModelSession modelSession;
-    private FakeMessagingBackend fakeBackend;
+    private MessagingBackend messagingBackend;
     private SessionStore sessionStore;
     private CommunicationSession viewedSession;
     private boolean pendingStartAfterPermission;
@@ -81,6 +86,8 @@ public class MainActivity extends Activity {
         sessionStore = new SessionStore(this);
         setContentView(buildUi());
         apiKeyInput.setText(AppConfig.getApiKey(this));
+        telegramTokenInput.setText(AppConfig.getTelegramBotToken(this));
+        updateProviderUi();
         viewedSession = sessionStore.loadLatest();
         renderSession(viewedSession);
         if (viewedSession != null) status("History restored", muted);
@@ -121,12 +128,7 @@ public class MainActivity extends Activity {
         apiKeyInput.setPadding(dp(12), 0, dp(12), 0);
         keyRow.addView(apiKeyInput, new LinearLayout.LayoutParams(0, dp(46), 1f));
 
-        voiceButton = new Button(this);
-        voiceButton.setText("Start");
-        voiceButton.setTextColor(Color.WHITE);
-        voiceButton.setTextSize(12);
-        voiceButton.setAllCaps(false);
-        voiceButton.setBackground(roundRect(accent, 12));
+        voiceButton = actionButton("Start", accent);
         LinearLayout.LayoutParams voiceLp = new LinearLayout.LayoutParams(dp(86), dp(46));
         voiceLp.setMargins(dp(10), 0, 0, 0);
         keyRow.addView(voiceButton, voiceLp);
@@ -135,11 +137,45 @@ public class MainActivity extends Activity {
         });
         root.addView(keyRow);
 
+        LinearLayout providerRow = new LinearLayout(this);
+        providerRow.setOrientation(LinearLayout.HORIZONTAL);
+        providerRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams providerRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        providerRowLp.setMargins(0, dp(9), 0, 0);
+        providerRow.setLayoutParams(providerRowLp);
+
+        telegramTokenInput = new EditText(this);
+        telegramTokenInput.setSingleLine(true);
+        telegramTokenInput.setHint("Telegram bot token");
+        telegramTokenInput.setHintTextColor(Color.rgb(100, 116, 139));
+        telegramTokenInput.setTextColor(text);
+        telegramTokenInput.setTextSize(12);
+        telegramTokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        telegramTokenInput.setBackground(roundRect(surface2, 12));
+        telegramTokenInput.setPadding(dp(12), 0, dp(12), 0);
+        providerRow.addView(telegramTokenInput, new LinearLayout.LayoutParams(0, dp(42), 1f));
+
+        providerButton = actionButton("Fake", surface2);
+        providerButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { toggleProvider(); }
+        });
+        LinearLayout.LayoutParams providerLp = new LinearLayout.LayoutParams(dp(92), dp(42));
+        providerLp.setMargins(dp(10), 0, 0, 0);
+        providerRow.addView(providerButton, providerLp);
+        root.addView(providerRow);
+
+        providerHint = new TextView(this);
+        providerHint.setTextSize(10);
+        providerHint.setTextColor(muted);
+        providerHint.setPadding(dp(2), dp(5), 0, dp(2));
+        root.addView(providerHint);
+
         statusText = new TextView(this);
         statusText.setText("Ready");
         statusText.setTextColor(muted);
         statusText.setTextSize(12);
-        statusText.setPadding(0, dp(10), 0, dp(6));
+        statusText.setPadding(0, dp(8), 0, dp(6));
         root.addView(statusText);
 
         LinearLayout sessionActions = new LinearLayout(this);
@@ -265,6 +301,29 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void toggleProvider() {
+        if (runtime != null) {
+            Toast.makeText(this, "End the current voice session before changing provider.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String current = AppConfig.getMessagingProvider(this);
+        String next = AppConfig.PROVIDER_TELEGRAM.equals(current)
+                ? AppConfig.PROVIDER_FAKE : AppConfig.PROVIDER_TELEGRAM;
+        AppConfig.setMessagingProvider(this, next);
+        AppConfig.setTelegramBotToken(this, telegramTokenInput.getText().toString());
+        updateProviderUi();
+    }
+
+    private void updateProviderUi() {
+        if (providerButton == null || providerHint == null || telegramTokenInput == null) return;
+        boolean telegram = AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this));
+        providerButton.setText(telegram ? "Telegram" : "Fake");
+        telegramTokenInput.setVisibility(telegram ? View.VISIBLE : View.GONE);
+        providerHint.setText(telegram
+                ? "Telegram MVP: the other person must open your bot and send /start once before Mate can find them."
+                : "Fake provider: safe local end-to-end simulation; no real message leaves the phone.");
+    }
+
     private void startFreshTask() {
         if (runtime != null) stopRuntime();
         viewedSession = null;
@@ -315,6 +374,12 @@ public class MainActivity extends Activity {
             return;
         }
         AppConfig.setApiKey(this, key);
+        AppConfig.setTelegramBotToken(this, telegramTokenInput.getText().toString());
+        if (AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))
+                && AppConfig.getTelegramBotToken(this).isEmpty()) {
+            Toast.makeText(this, "Enter a Telegram bot token or switch provider to Fake.", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingStartAfterPermission = true;
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_AUDIO);
@@ -323,10 +388,17 @@ public class MainActivity extends Activity {
         startRuntime(key);
     }
 
+    private MessagingBackend createMessagingBackend() {
+        if (AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))) {
+            return new TelegramMessagingBackend(this, AppConfig.getTelegramBotToken(this));
+        }
+        return new FakeMessagingBackend();
+    }
+
     private void startRuntime(String key) {
         inputTurn.clear();
         handler.removeCallbacks(flushInputTurnRunnable);
-        fakeBackend = new FakeMessagingBackend();
+        messagingBackend = createMessagingBackend();
         final CommunicationSession liveSession = new CommunicationSession();
         viewedSession = liveSession;
         sessionStore.save(liveSession);
@@ -366,7 +438,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        runtime = new CrewMateRuntime(liveSession, modelSession, fakeBackend, new CrewMateRuntime.Listener() {
+        runtime = new CrewMateRuntime(liveSession, modelSession, messagingBackend, new CrewMateRuntime.Listener() {
             @Override public void onSessionChanged(final CommunicationSession session) {
                 sessionStore.save(session);
                 runOnUiThread(new Runnable() {
@@ -415,8 +487,8 @@ public class MainActivity extends Activity {
         CrewMateRuntime target = runtime;
         if (target != null) target.close();
         runtime = null;
-        if (fakeBackend != null) fakeBackend.shutdown();
-        fakeBackend = null;
+        if (messagingBackend != null) messagingBackend.shutdown();
+        messagingBackend = null;
         modelSession = null;
         voiceButton.setText("Start");
         if (viewedSession != null) sessionStore.save(viewedSession);
@@ -437,6 +509,7 @@ public class MainActivity extends Activity {
         StringBuilder task = new StringBuilder();
         task.append(person).append("\n").append(goal).append("\n").append(CrewMateRuntime.displayStatus(session.status()));
         if (!session.pendingUserQuestion().isEmpty()) task.append("\nNeeds input: ").append(session.pendingUserQuestion());
+        if (!session.outcomeSummary().isEmpty()) task.append("\nOutcome: ").append(session.outcomeSummary());
         taskText.setText(task.toString());
 
         StringBuilder external = new StringBuilder();
@@ -503,7 +576,7 @@ public class MainActivity extends Activity {
     private int statusColor(String value) {
         if (value == null) return muted;
         if (value.contains("approval") || value.contains("input") || value.contains("Connecting")) return amber;
-        if (value.contains("Sending") || value.contains("Listening") || value.contains("reply")) return green;
+        if (value.contains("Sending") || value.contains("Listening") || value.contains("reply") || value.contains("Completed")) return green;
         if (value.contains("Error")) return red;
         return muted;
     }
