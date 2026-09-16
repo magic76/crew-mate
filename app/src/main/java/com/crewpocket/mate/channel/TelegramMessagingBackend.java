@@ -24,7 +24,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 /**
- * Foreground Telegram Bot API provider for the first real Crew Mate messaging flow.
+ * Telegram Bot API provider for Crew Mate.
  *
  * Telegram bots cannot initiate a private conversation with an arbitrary Telegram user.
  * The target must first open the bot and send /start (or any message). Once Crew Mate has
@@ -54,6 +54,16 @@ public final class TelegramMessagingBackend implements MessagingBackend {
         Contact asContact() { return new Contact(id, displayName); }
     }
 
+    private static final class IncomingWatch {
+        final long afterTimestamp;
+        final IncomingCallback callback;
+
+        IncomingWatch(long afterTimestamp, IncomingCallback callback) {
+            this.afterTimestamp = Math.max(0L, afterTimestamp);
+            this.callback = callback;
+        }
+    }
+
     private final String token;
     private final String baseUrl;
     private final SharedPreferences preferences;
@@ -64,6 +74,7 @@ public final class TelegramMessagingBackend implements MessagingBackend {
     private final Map<String, ContactRecord> contacts = new LinkedHashMap<String, ContactRecord>();
     private final Map<String, List<RemoteMessage>> history = new LinkedHashMap<String, List<RemoteMessage>>();
     private final Map<String, SendCallback> waitingReplies = new LinkedHashMap<String, SendCallback>();
+    private final Map<String, IncomingWatch> incomingWatches = new LinkedHashMap<String, IncomingWatch>();
 
     private volatile boolean running = true;
     private volatile long nextOffset;
@@ -102,7 +113,6 @@ public final class TelegramMessagingBackend implements MessagingBackend {
             @Override public void run() {
                 ContactRecord match = findCachedContact(query);
                 if (match == null && running) {
-                    // Give the long-poll worker a brief opportunity to ingest a recent /start.
                     try { Thread.sleep(900L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
                     match = findCachedContact(query);
                 }
@@ -177,8 +187,33 @@ public final class TelegramMessagingBackend implements MessagingBackend {
     }
 
     @Override
+    public void watchIncoming(final Contact contact, final long afterTimestamp, final IncomingCallback callback) {
+        if (callback == null) return;
+        requestExecutor.execute(new Runnable() {
+            @Override public void run() {
+                if (contact == null || clean(contact.id).isEmpty()) {
+                    callback.onError("Telegram contact is missing.");
+                    return;
+                }
+                RemoteMessage cached = newestIncomingAfter(contact.id, afterTimestamp);
+                if (cached != null) {
+                    callback.onMessage(cached);
+                    return;
+                }
+                synchronized (lock) {
+                    incomingWatches.put(contact.id, new IncomingWatch(afterTimestamp, callback));
+                }
+            }
+        });
+    }
+
+    @Override
     public void shutdown() {
         running = false;
+        synchronized (lock) {
+            incomingWatches.clear();
+            waitingReplies.clear();
+        }
         pollExecutor.shutdownNow();
         requestExecutor.shutdownNow();
         httpClient.dispatcher().cancelAll();
@@ -242,9 +277,30 @@ public final class TelegramMessagingBackend implements MessagingBackend {
                 remoteId(chatId, messageId), displayName, text, timestamp, false);
         if (!addHistory(chatId, incoming)) return;
 
-        SendCallback callback;
-        synchronized (lock) { callback = waitingReplies.remove(chatId); }
-        if (callback != null) callback.onReply(incoming);
+        SendCallback sendCallback;
+        IncomingCallback incomingCallback = null;
+        synchronized (lock) {
+            sendCallback = waitingReplies.remove(chatId);
+            IncomingWatch watch = incomingWatches.get(chatId);
+            if (watch != null && incoming.timestamp > watch.afterTimestamp) {
+                incomingWatches.remove(chatId);
+                incomingCallback = watch.callback;
+            }
+        }
+        if (sendCallback != null) sendCallback.onReply(incoming);
+        if (incomingCallback != null) incomingCallback.onMessage(incoming);
+    }
+
+    private RemoteMessage newestIncomingAfter(String chatId, long afterTimestamp) {
+        synchronized (lock) {
+            List<RemoteMessage> values = history.get(chatId);
+            if (values == null) return null;
+            for (int i = values.size() - 1; i >= 0; i--) {
+                RemoteMessage message = values.get(i);
+                if (!message.outgoing && message.timestamp > afterTimestamp) return message;
+            }
+            return null;
+        }
     }
 
     private ContactRecord findCachedContact(String query) {
