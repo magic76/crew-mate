@@ -1,73 +1,200 @@
 # Crew Mate
 
-Crew Mate is a voice-first AI communication assistant. You tell Mate what outcome you want; Mate communicates on your behalf while keeping the external conversation visible and your private instructions separate.
+Crew Mate is a voice-first AI communication assistant and the first external consumer of the shared `crew-agent-harness` runtime.
 
-## MVP flow
+The product boundary is deliberate:
 
-1. Speak privately to Crew Mate through Gemini Live.
-2. Gemini calls `create_task` with the contact, goal, and private context.
-3. Mate drafts and sends external messages through a `ChannelAdapter`.
-4. `MockChannel` returns a deterministic simulated reply.
-5. The external reply is injected back into the live session as trusted `EXTERNAL_MESSAGE` context.
-6. Mate either continues the task, asks the user for a decision, or completes the task.
-7. `DecisionGate` blocks money, sensitive data, cancellation, contracts, and other important commitments until explicit approval.
+- **Agent Harness** owns the agent loop, tool dispatch, normalized events, and orchestration.
+- **Crew Mate** owns prompt behavior, communication state, approval policy, messaging providers, Gemini Live adaptation, and UI.
 
-## Architecture
+## Workspace layout
+
+Crew Mate uses a Gradle Composite Build. Keep both repositories as siblings:
 
 ```text
-User voice
-   |
-   v
-MateLiveClient (Gemini Live)
-   | function calls
-   v
-MateAgent
-   |---- DecisionGate
-   |---- CommunicationTask
-   |
-   v
-ChannelAdapter
-   |
-   +---- MockChannel (MVP)
-   +---- Telegram / Email / LINE adapters later
+workspace/
+├── crew-agent-harness/
+└── crew-mate/
 ```
 
-The app deliberately separates two surfaces:
+The integration is pinned and tested against harness commit:
 
-- **Private voice conversation:** User <-> Crew Mate. This contains goals, preferences, and private constraints.
-- **External conversation:** Crew Mate <-> Contact. Everything actually sent or received is shown here.
+```text
+b92902e7cf7f2b05cb8281ab408297dacf8347bb
+```
 
-## Current tools
+If the harness is not present locally:
 
-- `create_task`
-- `update_task_context`
+```bash
+cd <workspace>
+git clone https://github.com/magic76/crew-agent-harness.git
+cd crew-agent-harness
+git checkout b92902e7cf7f2b05cb8281ab408297dacf8347bb
+```
+
+`crew-mate/settings.gradle` substitutes the external module:
+
+```gradle
+includeBuild('../crew-agent-harness') {
+    dependencySubstitution {
+        substitute module('com.magic76.crew:agent-core') using project(':agent-core')
+    }
+}
+```
+
+The app depends on:
+
+```gradle
+implementation 'com.magic76.crew:agent-core:0.1.0-SNAPSHOT'
+```
+
+No `agent-core` source is copied into Crew Mate.
+
+## Runtime architecture
+
+```text
+CrewMate UI
+    ↓
+CrewMateRuntime + CrewMateAgentSpec
+    ↓
+AgentHarness
+    ↓
+ModelSession
+    ↓
+GeminiLiveModelSession
+    ↓
+Gemini Live
+
+AgentHarness
+    ↓ tool calls
+CrewMateToolRegistry
+    ↓
+CommunicationSession / Approval Policy / MessagingBackend
+```
+
+`GeminiLiveModelSession` adapts the existing Crew Teacher-style realtime WebSocket/audio path to the provider-neutral `ModelSession` contract. Reasoning/orchestration remains in the shared harness; Gemini-specific transport does not leak into `agent-core`.
+
+## Crew Mate tools
+
+`CrewMateAgentSpec` exposes exactly these first-version tools:
+
+- `find_contact`
+- `get_conversation`
 - `draft_message`
 - `send_message`
-- `ask_user`
-- `complete_task`
+- `request_user_input`
 
-## Run
+Unknown tools are rejected by `AgentHarness`.
 
-Open the project in Android Studio, sync Gradle, and run the `app` module on Android 7.0+.
+## Communication state
 
-On first launch:
+Conversation state is first-class product data in `CommunicationSession`, not only model context.
 
-1. Enter a Gemini API key.
-2. Tap **Start** and grant microphone permission.
-3. Say something like: `幫我跟 Kevin 約明天下午的 meeting，最好三點以後。`
-4. Watch the external conversation panel. The mock contact will reply automatically.
+Each `Message` stores:
 
-The Live implementation follows the same direct WebSocket/audio approach used in Crew Teacher: 16 kHz PCM microphone input, Gemini Live audio responses, input/output transcription, and function calls.
+- `id`
+- `sender`
+- `recipient`
+- `content`
+- `timestamp`
+- `status`
 
-## Safety boundary
+Senders are:
 
-The model does not directly own communication side effects. `MateAgent` and `DecisionGate` decide whether a requested action is allowed. High-risk drafts remain visibly unsent until the user explicitly approves them.
+- `USER`
+- `MATE`
+- `OTHER_PERSON`
+- `SYSTEM`
 
-## Next milestones
+The UI separates the private `You ↔ Mate` conversation from the external `Mate ↔ other person` timeline.
 
-- Persist multiple tasks locally instead of one in-memory active task.
-- Add foreground session/service handling and session resumption comparable to Crew Teacher.
-- Add Contacts integration and contact disambiguation.
-- Implement the first real channel adapter (Telegram or email).
-- Add follow-up/reminder scheduling and task notifications.
-- Add richer approval policies per contact/task.
+## Approval policy
+
+The first version uses **ALWAYS_ASK**.
+
+`draft_message` can run automatically. `send_message` cannot.
+
+When the model requests `send_message`, `CrewMateToolRegistry` creates `PendingApproval` and deliberately leaves that tool invocation incomplete. The actual messaging backend is not called until the user chooses **Allow send**. The user may edit the exact outgoing text or cancel it.
+
+There is no model-provided `user_approved` flag and no model-only path around the authorization boundary. A pending approval can be consumed once, preventing duplicate sends.
+
+## Fake end-to-end flow
+
+The first provider is `FakeMessagingBackend`:
+
+```text
+User: 幫我問 John 明天晚上有沒有空吃飯
+        ↓
+find_contact
+        ↓
+draft_message
+        ↓
+send_message
+        ↓
+WAITING_FOR_APPROVAL
+        ↓ user approves
+fake send
+        ↓
+John: 明天 7 點可以。
+        ↓
+EXTERNAL_MESSAGE injected back through AgentHarness
+```
+
+A real Telegram/LINE/email implementation only needs to replace `MessagingBackend`; it does not change `AgentHarness` or `CrewMateAgentSpec` orchestration.
+
+## Trace privacy
+
+`CrewMateRuntime` listens to `AgentHarness.Listener` and records metadata-only trace entries for:
+
+- `STARTED`
+- `TOOL_REQUESTED`
+- `TOOL_COMPLETED`
+- `TOOL_FAILED`
+- `INTERRUPTED`
+- `TURN_COMPLETED`
+- `STOPPED`
+- `ERROR`
+
+Trace entries include session id, tool name, call id, success/failure, and duration. Private message bodies and transcripts are intentionally not serialized.
+
+## Tests
+
+`CrewMateHarnessIntegrationTest` covers:
+
+- AgentSpec tool exposure
+- undeclared tool rejection by the shared harness
+- ToolResult call-id preservation
+- duplicate completion suppression
+- no send before approval
+- approved message sends only once
+- conversation ordering
+- trace privacy
+- fake John end-to-end flow
+
+CI checks out `crew-agent-harness` at the pinned commit as a sibling and runs:
+
+```bash
+gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace
+```
+
+## Run locally
+
+From `crew-mate/`, with the sibling harness present:
+
+```bash
+gradle :app:testDebugUnitTest :app:assembleDebug
+```
+
+Then install the debug APK normally with Android Studio or ADB. On launch, enter a Gemini API key, grant microphone permission, and start a voice session.
+
+## Next provider milestone
+
+To connect a real messaging provider, implement only:
+
+1. contact lookup in `MessagingBackend.findContact`
+2. thread fetch in `MessagingBackend.getConversation`
+3. actual send + inbound reply delivery in `MessagingBackend.sendMessage`
+4. provider authentication/account setup
+5. stable provider message/contact IDs for deduplication
+
+The shared agent loop and approval boundary should remain unchanged.

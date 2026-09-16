@@ -16,3 +16,14 @@ dependencyResolutionManagement {
 
 rootProject.name = "CrewMate"
 include ':app'
+
+// Crew Mate is the first external consumer of the shared Crew Agent Harness.
+// Expected local workspace layout:
+// workspace/
+// ├── crew-agent-harness/
+// └── crew-mate/
+includeBuild('../crew-agent-harness') {
+    dependencySubstitution {
+        substitute module('com.magic76.crew:agent-core') using project(':agent-core')
+    }
+}
