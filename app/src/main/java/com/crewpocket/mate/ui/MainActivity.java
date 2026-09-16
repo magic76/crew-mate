@@ -460,9 +460,10 @@ public class MainActivity extends Activity {
 
         final CommunicationSession liveSession;
         final boolean resumeExisting = shouldResume(viewedSession);
+        final CommunicationSession.Status resumeStatus = resumeExisting ? viewedSession.status() : null;
         final boolean resumeAfterReply = resumeExisting
-                && (viewedSession.status() == CommunicationSession.Status.REPLY_RECEIVED
-                || viewedSession.status() == CommunicationSession.Status.STOPPED);
+                && (resumeStatus == CommunicationSession.Status.REPLY_RECEIVED
+                || resumeStatus == CommunicationSession.Status.STOPPED);
         if (resumeExisting) {
             liveSession = viewedSession;
         } else {
@@ -471,9 +472,7 @@ public class MainActivity extends Activity {
             sessionStore.save(liveSession);
         }
 
-        if (liveSession != null) {
-            stopService(new Intent(this, CommunicationContinuationService.class));
-        }
+        stopService(new Intent(this, CommunicationContinuationService.class));
         messagingBackend = createMessagingBackend();
 
         modelSession = new GeminiLiveModelSession(this, key, AppConfig.getVoice(this), new GeminiLiveModelSession.UiListener() {
@@ -545,7 +544,35 @@ public class MainActivity extends Activity {
         status("Connecting…", amber);
         renderSession(liveSession);
         runtime.start();
-        if (resumeAfterReply) runtime.resumePersistedTask();
+        if (resumeAfterReply) {
+            runtime.resumePersistedTask();
+        } else if (resumeExisting
+                && resumeStatus == CommunicationSession.Status.WAITING_FOR_REPLY
+                && AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))) {
+            watchReplyWhileRuntimeIsActive(liveSession);
+        }
+    }
+
+    private void watchReplyWhileRuntimeIsActive(final CommunicationSession session) {
+        final MessagingBackend backend = messagingBackend;
+        final CrewMateRuntime activeRuntime = runtime;
+        if (backend == null || activeRuntime == null || session == null || session.targetPersonId().isEmpty()) return;
+        MessagingBackend.Contact contact = new MessagingBackend.Contact(session.targetPersonId(), session.targetPerson());
+        backend.watchIncoming(contact, session.latestMessageTimestamp(), new MessagingBackend.IncomingCallback() {
+            @Override public void onMessage(MessagingBackend.RemoteMessage reply) {
+                CrewMateRuntime current = runtime;
+                if (current != null && current == activeRuntime) current.acceptExternalReply(reply);
+            }
+
+            @Override public void onError(final String message) {
+                if (runtime != activeRuntime) return;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        status(message == null || message.trim().isEmpty() ? "Waiting for reply" : message, red);
+                    }
+                });
+            }
+        });
     }
 
     private boolean shouldResume(CommunicationSession session) {
