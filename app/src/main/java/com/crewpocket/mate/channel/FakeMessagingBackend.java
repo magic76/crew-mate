@@ -59,7 +59,7 @@ public final class FakeMessagingBackend implements MessagingBackend {
 
     public synchronized int sendCount() { return sendCount; }
 
-    public void shutdown() { executor.shutdownNow(); }
+    @Override public void shutdown() { executor.shutdownNow(); }
 
     private String buildReply(String content) {
         String value = content == null ? "" : content.toLowerCase(Locale.US);

@@ -28,6 +28,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private final CrewMateToolRegistry tools;
     private final AgentHarness harness;
     private final Listener listener;
+    private volatile boolean closed;
 
     public CrewMateRuntime(ModelSession modelSession, MessagingBackend backend, Listener listener) {
         this(new CommunicationSession(), modelSession, backend, listener);
@@ -46,16 +47,26 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public List<AgentTraceRecorder.TraceEntry> trace() { return traceRecorder.snapshot(); }
     public String serializedTrace() { return traceRecorder.serialize(); }
 
-    public void start() { harness.start(); }
+    public void start() {
+        closed = false;
+        harness.start();
+    }
+
     public void close() {
+        if (closed) return;
+        closed = true;
         modelTurn.clear();
         tools.cancelPending();
         harness.close();
     }
-    public void interrupt() { harness.interrupt(); }
+
+    public void interrupt() {
+        if (!closed) harness.interrupt();
+    }
 
     /** Used for typed/private control paths. Live microphone audio stays inside the Gemini adapter. */
     public void submitPrivateText(String text) {
+        if (closed) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         recordUserTranscript(value);
@@ -64,6 +75,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     /** Input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
+        if (closed) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
@@ -74,8 +86,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         notifyChanged();
     }
 
-    public boolean approvePending(String editedContent) { return tools.approvePending(editedContent); }
-    public boolean cancelPending() { return tools.cancelPending(); }
+    public boolean approvePending(String editedContent) { return !closed && tools.approvePending(editedContent); }
+    public boolean cancelPending() { return !closed && tools.cancelPending(); }
 
     @Override
     public void onAgentEvent(AgentEvent event) {
@@ -83,36 +95,39 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (event == null) return;
         switch (event.type()) {
             case MODEL_TEXT:
-                modelTurn.append(event.text());
+                if (!closed) modelTurn.append(event.text());
                 break;
             case TOOL_REQUESTED:
-                // Some providers request a tool before emitting TURN_COMPLETED. Preserve any
-                // already-spoken text as one message instead of leaving it invisible.
-                commitModelTurn();
+                if (!closed) commitModelTurn();
                 break;
             case STARTED:
-                emitStatus("Thinking");
+                if (!closed) emitStatus("Thinking");
                 break;
             case INTERRUPTED:
-                // Interrupted model speech is intentionally not persisted as a completed message.
                 modelTurn.clear();
-                emitStatus("Interrupted");
+                if (!closed) emitStatus("Interrupted");
                 break;
             case TURN_COMPLETED:
-                commitModelTurn();
-                emitStatus(displayStatus(session.status()));
+                if (!closed) {
+                    commitModelTurn();
+                    emitStatus(displayStatus(session.status()));
+                }
                 break;
             case STOPPED:
                 modelTurn.clear();
-                session.setStatus(CommunicationSession.Status.STOPPED);
+                if (session.status() != CommunicationSession.Status.COMPLETED) {
+                    session.setStatus(CommunicationSession.Status.STOPPED);
+                }
                 notifyChanged();
-                emitStatus("Stopped");
+                emitStatus(displayStatus(session.status()));
                 break;
             case ERROR:
                 modelTurn.clear();
-                session.setStatus(CommunicationSession.Status.ERROR);
+                if (session.status() != CommunicationSession.Status.COMPLETED) {
+                    session.setStatus(CommunicationSession.Status.ERROR);
+                }
                 notifyChanged();
-                emitStatus("Error");
+                emitStatus(displayStatus(session.status()));
                 break;
             default:
                 break;
@@ -126,10 +141,13 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         notifyChanged();
     }
 
-    @Override public void onSessionChanged(CommunicationSession changed) { notifyChanged(); }
+    @Override public void onSessionChanged(CommunicationSession changed) {
+        if (!closed) notifyChanged();
+    }
 
     @Override
     public void onApprovalRequired(CommunicationSession changed, PendingApproval approval) {
+        if (closed) return;
         notifyChanged();
         emitStatus("Waiting for approval");
         if (listener != null) listener.onApprovalRequired(changed, approval);
@@ -137,15 +155,17 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     @Override
     public void onExternalReply(CommunicationSession changed, Message message) {
+        if (closed) return;
         notifyChanged();
         emitStatus("Thinking");
         String person = changed.targetPerson().isEmpty() ? "OTHER_PERSON" : changed.targetPerson();
         harness.submitText("EXTERNAL_MESSAGE from " + person + ": " + message.content()
-                + "\nContinue only within the user's stated goal. If a new decision is needed, call request_user_input.");
+                + "\nContinue only within the user's stated goal. If the goal is now achieved, call complete_task. If a new decision is needed, call request_user_input.");
     }
 
     @Override
     public void onUserInputRequested(CommunicationSession changed, String question, String reason) {
+        if (closed) return;
         notifyChanged();
         emitStatus("Needs your input");
     }

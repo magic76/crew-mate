@@ -11,7 +11,7 @@ public final class Message {
         PENDING_APPROVAL,
         SENDING,
         SENT,
-        DELIVERED,
+        DELIVERED, // legacy provider callback name; normalized to SENT in product state
         RECEIVED,
         INFO,
         CANCELLED,
@@ -35,7 +35,7 @@ public final class Message {
         this.recipient = clean(recipient, "");
         this.content = content == null ? "" : content;
         this.timestamp = timestamp;
-        this.status = status == null ? Status.INFO : status;
+        this.status = normalizeStatus(status);
     }
 
     public synchronized String content() { return content; }
@@ -46,7 +46,12 @@ public final class Message {
     }
 
     public synchronized void updateStatus(Status value) {
-        if (value != null) status = value;
+        if (value != null) status = normalizeStatus(value);
+    }
+
+    private static Status normalizeStatus(Status value) {
+        if (value == null) return Status.INFO;
+        return value == Status.DELIVERED ? Status.SENT : value;
     }
 
     private static String clean(String value, String fallback) {
