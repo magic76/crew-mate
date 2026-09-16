@@ -29,7 +29,11 @@ public final class CrewMateAgentSpec implements AgentSpec {
             new ToolSpec(
                     "request_user_input",
                     "Ask the user for missing information, a decision, or clarification before continuing.",
-                    "{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"}},\"required\":[\"question\"]}")
+                    "{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"}},\"required\":[\"question\"]}"),
+            new ToolSpec(
+                    "complete_task",
+                    "Mark the communication goal complete and save a concise outcome summary after the external conversation actually reached the goal.",
+                    "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}")
     ));
 
     @Override public String id() { return "crew-mate"; }
@@ -47,6 +51,7 @@ public final class CrewMateAgentSpec implements AgentSpec {
                 + "- send_message is authorization-gated by the product. A send request may remain pending until the user approves it. Never claim it was sent before the tool succeeds.\n"
                 + "- If information or a decision is missing, call request_user_input instead of guessing.\n"
                 + "- After an EXTERNAL_MESSAGE system event, continue pursuing the approved goal, but any new outbound message still requires approval.\n"
+                + "- When the communication goal is genuinely achieved, call complete_task with a concise factual outcome summary.\n"
                 + "- Keep spoken turns short. The app already displays the full external conversation.\n"
                 + "- Never put provider-specific behavior, approval rules, or product state assumptions into the shared agent runtime.";
     }
