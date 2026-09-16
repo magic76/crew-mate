@@ -78,6 +78,7 @@ public final class SessionStore {
         root.put("target_person", session.targetPerson());
         root.put("target_person_id", session.targetPersonId());
         root.put("goal", session.goal());
+        root.put("outcome_summary", session.outcomeSummary());
         root.put("status", session.status().name());
         root.put("pending_user_question", session.pendingUserQuestion());
         root.put("updated_at", session.updatedAt());
@@ -102,6 +103,7 @@ public final class SessionStore {
             CommunicationSession session = new CommunicationSession(root.optString("session_id"));
             session.setTarget(root.optString("target_person_id"), root.optString("target_person"));
             session.setGoal(root.optString("goal"));
+            session.setOutcomeSummary(root.optString("outcome_summary"));
             session.setPendingUserQuestion(root.optString("pending_user_question"));
 
             JSONArray messages = root.optJSONArray("messages");
