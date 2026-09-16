@@ -43,7 +43,7 @@ public final class FakeMessagingBackend implements MessagingBackend {
             sendCount++;
             history.add(new RemoteMessage(outgoingId, "Mate", content, System.currentTimeMillis(), true));
         }
-        callback.onSent(outgoingId);
+        callback.onDelivered(outgoingId);
 
         executor.schedule(new Runnable() {
             @Override public void run() {
