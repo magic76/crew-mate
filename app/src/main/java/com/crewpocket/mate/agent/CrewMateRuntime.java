@@ -4,6 +4,7 @@ import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.PendingApproval;
+import com.crewpocket.mate.voice.TurnTextAccumulator;
 import com.magic76.crew.agent.AgentEvent;
 import com.magic76.crew.agent.AgentHarness;
 import com.magic76.crew.agent.ModelSession;
@@ -21,13 +22,21 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         void onRuntimeStatus(String status);
     }
 
-    private final CommunicationSession session = new CommunicationSession();
+    private final CommunicationSession session;
     private final AgentTraceRecorder traceRecorder = new AgentTraceRecorder();
+    private final TurnTextAccumulator modelTurn = new TurnTextAccumulator();
     private final CrewMateToolRegistry tools;
     private final AgentHarness harness;
     private final Listener listener;
 
     public CrewMateRuntime(ModelSession modelSession, MessagingBackend backend, Listener listener) {
+        this(new CommunicationSession(), modelSession, backend, listener);
+    }
+
+    public CrewMateRuntime(CommunicationSession session, ModelSession modelSession,
+                           MessagingBackend backend, Listener listener) {
+        if (session == null) throw new IllegalArgumentException("session is null");
+        this.session = session;
         this.listener = listener;
         tools = new CrewMateToolRegistry(session, backend, this);
         harness = new AgentHarness(new CrewMateAgentSpec(), modelSession, tools.registry(), this);
@@ -38,7 +47,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public String serializedTrace() { return traceRecorder.serialize(); }
 
     public void start() { harness.start(); }
-    public void close() { harness.close(); }
+    public void close() {
+        modelTurn.clear();
+        tools.cancelPending();
+        harness.close();
+    }
     public void interrupt() { harness.interrupt(); }
 
     /** Used for typed/private control paths. Live microphone audio stays inside the Gemini adapter. */
@@ -70,27 +83,33 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (event == null) return;
         switch (event.type()) {
             case MODEL_TEXT:
-                if (event.text() != null && !event.text().trim().isEmpty()) {
-                    session.addMessage(new Message(Message.Sender.MATE, "USER",
-                            event.text().trim(), Message.Status.INFO));
-                    notifyChanged();
-                }
+                modelTurn.append(event.text());
+                break;
+            case TOOL_REQUESTED:
+                // Some providers request a tool before emitting TURN_COMPLETED. Preserve any
+                // already-spoken text as one message instead of leaving it invisible.
+                commitModelTurn();
                 break;
             case STARTED:
                 emitStatus("Thinking");
                 break;
             case INTERRUPTED:
+                // Interrupted model speech is intentionally not persisted as a completed message.
+                modelTurn.clear();
                 emitStatus("Interrupted");
                 break;
             case TURN_COMPLETED:
+                commitModelTurn();
                 emitStatus(displayStatus(session.status()));
                 break;
             case STOPPED:
+                modelTurn.clear();
                 session.setStatus(CommunicationSession.Status.STOPPED);
                 notifyChanged();
                 emitStatus("Stopped");
                 break;
             case ERROR:
+                modelTurn.clear();
                 session.setStatus(CommunicationSession.Status.ERROR);
                 notifyChanged();
                 emitStatus("Error");
@@ -98,6 +117,13 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
             default:
                 break;
         }
+    }
+
+    private void commitModelTurn() {
+        String completed = modelTurn.take();
+        if (completed.isEmpty()) return;
+        session.addMessage(new Message(Message.Sender.MATE, "USER", completed, Message.Status.INFO));
+        notifyChanged();
     }
 
     @Override public void onSessionChanged(CommunicationSession changed) { notifyChanged(); }

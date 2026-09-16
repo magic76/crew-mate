@@ -9,6 +9,8 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -26,10 +28,15 @@ import com.crewpocket.mate.config.AppConfig;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.PendingApproval;
+import com.crewpocket.mate.storage.SessionStore;
 import com.crewpocket.mate.voice.GeminiLiveModelSession;
+import com.crewpocket.mate.voice.TurnTextAccumulator;
+
+import java.util.List;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_AUDIO = 701;
+    private static final long INPUT_TRANSCRIPT_SETTLE_MS = 900L;
 
     private final int bg = Color.rgb(9, 15, 31);
     private final int surface = Color.rgb(17, 25, 47);
@@ -41,18 +48,28 @@ public class MainActivity extends Activity {
     private final int amber = Color.rgb(251, 191, 36);
     private final int red = Color.rgb(248, 113, 113);
 
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final TurnTextAccumulator inputTurn = new TurnTextAccumulator();
+    private final Runnable flushInputTurnRunnable = new Runnable() {
+        @Override public void run() { flushUserInputTurn(); }
+    };
+
     private EditText apiKeyInput;
     private Button voiceButton;
     private TextView statusText;
     private TextView taskText;
     private TextView externalTranscript;
     private TextView privateTranscript;
+    private ScrollView externalScroll;
+    private ScrollView privateScroll;
     private LinearLayout approvalCard;
     private TextView approvalDraft;
 
     private CrewMateRuntime runtime;
     private GeminiLiveModelSession modelSession;
     private FakeMessagingBackend fakeBackend;
+    private SessionStore sessionStore;
+    private CommunicationSession viewedSession;
     private boolean pendingStartAfterPermission;
     private String editedApprovalText = "";
 
@@ -61,9 +78,12 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
+        sessionStore = new SessionStore(this);
         setContentView(buildUi());
         apiKeyInput.setText(AppConfig.getApiKey(this));
-        renderSession(null);
+        viewedSession = sessionStore.loadLatest();
+        renderSession(viewedSession);
+        if (viewedSession != null) status("History restored", muted);
     }
 
     private View buildUi() {
@@ -119,8 +139,25 @@ public class MainActivity extends Activity {
         statusText.setText("Ready");
         statusText.setTextColor(muted);
         statusText.setTextSize(12);
-        statusText.setPadding(0, dp(10), 0, dp(10));
+        statusText.setPadding(0, dp(10), 0, dp(6));
         root.addView(statusText);
+
+        LinearLayout sessionActions = new LinearLayout(this);
+        sessionActions.setOrientation(LinearLayout.HORIZONTAL);
+        sessionActions.setPadding(0, 0, 0, dp(10));
+        Button newTask = actionButton("New task", surface2);
+        newTask.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { startFreshTask(); }
+        });
+        sessionActions.addView(newTask, new LinearLayout.LayoutParams(0, dp(38), 1f));
+        Button history = actionButton("History", surface2);
+        history.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showHistory(); }
+        });
+        LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        historyLp.setMargins(dp(8), 0, 0, 0);
+        sessionActions.addView(history, historyLp);
+        root.addView(sessionActions);
 
         taskText = cardText(13);
         taskText.setTypeface(Typeface.DEFAULT_BOLD);
@@ -129,7 +166,7 @@ public class MainActivity extends Activity {
 
         root.addView(sectionTitle("Mate ↔ other person"));
         externalTranscript = cardText(13);
-        ScrollView externalScroll = new ScrollView(this);
+        externalScroll = new ScrollView(this);
         externalScroll.setFillViewport(true);
         externalScroll.addView(externalTranscript);
         externalScroll.setBackground(roundRect(surface, 16));
@@ -143,7 +180,7 @@ public class MainActivity extends Activity {
 
         root.addView(sectionTitle("You ↔ Mate · private"));
         privateTranscript = cardText(13);
-        ScrollView privateScroll = new ScrollView(this);
+        privateScroll = new ScrollView(this);
         privateScroll.setFillViewport(true);
         privateScroll.addView(privateTranscript);
         privateScroll.setBackground(roundRect(surface, 16));
@@ -189,9 +226,7 @@ public class MainActivity extends Activity {
         Button approve = actionButton("Allow send", Color.rgb(5, 150, 105));
         approve.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                if (runtime != null && runtime.approvePending(editedApprovalText)) {
-                    status("Sending", green);
-                }
+                if (runtime != null && runtime.approvePending(editedApprovalText)) status("Sending", green);
             }
         });
         LinearLayout.LayoutParams approveLp = new LinearLayout.LayoutParams(0, dp(42), 1.2f);
@@ -230,6 +265,44 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void startFreshTask() {
+        if (runtime != null) stopRuntime();
+        viewedSession = null;
+        editedApprovalText = "";
+        renderSession(null);
+        status("Ready for a new task", muted);
+    }
+
+    private void showHistory() {
+        if (runtime != null) {
+            Toast.makeText(this, "End the current voice session before browsing history.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final List<CommunicationSession> sessions = sessionStore.loadAll();
+        if (sessions.isEmpty()) {
+            Toast.makeText(this, "No saved sessions yet.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[sessions.size()];
+        for (int i = 0; i < sessions.size(); i++) {
+            CommunicationSession session = sessions.get(i);
+            String person = session.targetPerson().isEmpty() ? "Untitled" : session.targetPerson();
+            String goal = session.goal().isEmpty() ? "No goal yet" : session.goal();
+            labels[i] = person + " · " + goal + " · " + CrewMateRuntime.displayStatus(session.status());
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Communication history")
+                .setItems(labels, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        viewedSession = sessions.get(which);
+                        renderSession(viewedSession);
+                        status("Viewing saved session", muted);
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
     private void toggleVoice() {
         if (runtime != null) {
             stopRuntime();
@@ -251,42 +324,56 @@ public class MainActivity extends Activity {
     }
 
     private void startRuntime(String key) {
+        inputTurn.clear();
+        handler.removeCallbacks(flushInputTurnRunnable);
         fakeBackend = new FakeMessagingBackend();
-        modelSession = new GeminiLiveModelSession(this, key, AppConfig.getVoice(this),
-                new GeminiLiveModelSession.UiListener() {
-                    @Override public void onStatus(final String value) {
-                        runOnUiThread(new Runnable() {
-                            @Override public void run() {
-                                if ("Listening".equals(value)) status("Listening", green);
-                            }
-                        });
-                    }
+        final CommunicationSession liveSession = new CommunicationSession();
+        viewedSession = liveSession;
+        sessionStore.save(liveSession);
 
-                    @Override public void onInputTranscript(final String value) {
-                        runOnUiThread(new Runnable() {
-                            @Override public void run() {
-                                if (runtime != null) runtime.recordUserTranscript(value);
-                            }
-                        });
-                    }
-
-                    @Override public void onSpeakingChanged(final boolean speaking) {
-                        if (speaking) runOnUiThread(new Runnable() {
-                            @Override public void run() { status("Mate is speaking…", accent); }
-                        });
-                    }
-
-                    @Override public void onError(final String message) {
-                        runOnUiThread(new Runnable() {
-                            @Override public void run() { status(message, red); }
-                        });
+        modelSession = new GeminiLiveModelSession(this, key, AppConfig.getVoice(this), new GeminiLiveModelSession.UiListener() {
+            @Override public void onStatus(final String value) {
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if ("Listening".equals(value)) status("Listening", green);
                     }
                 });
+            }
 
-        runtime = new CrewMateRuntime(modelSession, fakeBackend, new CrewMateRuntime.Listener() {
-            @Override public void onSessionChanged(final CommunicationSession session) {
+            @Override public void onInputTranscript(final String value) {
                 runOnUiThread(new Runnable() {
-                    @Override public void run() { renderSession(session); }
+                    @Override public void run() {
+                        inputTurn.append(value);
+                        handler.removeCallbacks(flushInputTurnRunnable);
+                        handler.postDelayed(flushInputTurnRunnable, INPUT_TRANSCRIPT_SETTLE_MS);
+                    }
+                });
+            }
+
+            @Override public void onSpeakingChanged(final boolean speaking) {
+                if (speaking) runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        flushUserInputTurn();
+                        status("Mate is speaking…", accent);
+                    }
+                });
+            }
+
+            @Override public void onError(final String message) {
+                runOnUiThread(new Runnable() {
+                    @Override public void run() { status(message, red); }
+                });
+            }
+        });
+
+        runtime = new CrewMateRuntime(liveSession, modelSession, fakeBackend, new CrewMateRuntime.Listener() {
+            @Override public void onSessionChanged(final CommunicationSession session) {
+                sessionStore.save(session);
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        viewedSession = session;
+                        renderSession(session);
+                    }
                 });
             }
 
@@ -301,63 +388,79 @@ public class MainActivity extends Activity {
 
             @Override public void onRuntimeStatus(final String value) {
                 runOnUiThread(new Runnable() {
-                    @Override public void run() { status(value, statusColor(value)); }
+                    @Override public void run() {
+                        if (value != null && !"Thinking".equals(value)) flushUserInputTurn();
+                        status(value, statusColor(value));
+                    }
                 });
             }
         });
 
         voiceButton.setText("End");
         status("Connecting…", amber);
+        renderSession(liveSession);
         runtime.start();
     }
 
-    private void stopRuntime() {
+    private void flushUserInputTurn() {
+        handler.removeCallbacks(flushInputTurnRunnable);
+        String completed = inputTurn.take();
+        if (completed.isEmpty()) return;
         CrewMateRuntime target = runtime;
-        runtime = null;
+        if (target != null) target.recordUserTranscript(completed);
+    }
+
+    private void stopRuntime() {
+        flushUserInputTurn();
+        CrewMateRuntime target = runtime;
         if (target != null) target.close();
+        runtime = null;
         if (fakeBackend != null) fakeBackend.shutdown();
         fakeBackend = null;
         modelSession = null;
         voiceButton.setText("Start");
+        if (viewedSession != null) sessionStore.save(viewedSession);
         status("Stopped", muted);
     }
 
     private void renderSession(CommunicationSession session) {
         if (session == null) {
             taskText.setText("No active communication session\nTry: 幫我問 John 明天晚上有沒有空吃飯");
-            externalTranscript.setText("Mate → other person and replies will appear here.");
-            privateTranscript.setText("Your instructions to Mate stay here and are never copied into the external timeline.");
+            updateTranscript(externalTranscript, externalScroll, "Mate → other person and replies will appear here.");
+            updateTranscript(privateTranscript, privateScroll, "Your instructions to Mate stay here and are never copied into the external timeline.");
             approvalCard.setVisibility(View.GONE);
             return;
         }
 
         String person = session.targetPerson().isEmpty() ? "Finding contact…" : session.targetPerson();
         String goal = session.goal().isEmpty() ? "Understanding your goal…" : session.goal();
-        taskText.setText(person + "\n" + goal + "\n" + CrewMateRuntime.displayStatus(session.status()));
+        StringBuilder task = new StringBuilder();
+        task.append(person).append("\n").append(goal).append("\n").append(CrewMateRuntime.displayStatus(session.status()));
+        if (!session.pendingUserQuestion().isEmpty()) task.append("\nNeeds input: ").append(session.pendingUserQuestion());
+        taskText.setText(task.toString());
 
         StringBuilder external = new StringBuilder();
         StringBuilder privateChat = new StringBuilder();
         for (Message message : session.messages()) {
             if (message.sender == Message.Sender.OTHER_PERSON
                     || (message.sender == Message.Sender.MATE && !"USER".equals(message.recipient))) {
-                if (message.sender == Message.Sender.MATE) {
-                    external.append("Mate → ").append(person);
-                } else {
-                    external.append(person).append(" → Mate");
-                }
-                if (message.status() == Message.Status.DRAFT) external.append(" · DRAFT");
-                if (message.status() == Message.Status.PENDING_APPROVAL) external.append(" · NOT SENT");
+                if (message.sender == Message.Sender.MATE) external.append("Mate → ").append(person);
+                else external.append(person).append(" → Mate");
+                String state = externalStatus(message.status());
+                if (!state.isEmpty()) external.append(" · ").append(state);
                 external.append("\n").append(message.content()).append("\n\n");
             } else if (message.sender == Message.Sender.USER || message.sender == Message.Sender.MATE) {
                 privateChat.append(message.sender == Message.Sender.USER ? "You" : "Mate")
                         .append("\n").append(message.content()).append("\n\n");
             }
         }
-        externalTranscript.setText(external.length() == 0 ? "Preparing conversation…" : external.toString());
-        privateTranscript.setText(privateChat.length() == 0 ? "Speak naturally to Mate." : privateChat.toString());
+        updateTranscript(externalTranscript, externalScroll,
+                external.length() == 0 ? "Preparing conversation…" : external.toString());
+        updateTranscript(privateTranscript, privateScroll,
+                privateChat.length() == 0 ? "Speak naturally to Mate." : privateChat.toString());
 
         PendingApproval approval = session.pendingApproval();
-        if (approval != null && approval.state() == PendingApproval.State.WAITING) {
+        if (runtime != null && approval != null && approval.state() == PendingApproval.State.WAITING) {
             if (editedApprovalText.isEmpty()) editedApprovalText = approval.content();
             approvalDraft.setText(editedApprovalText);
             approvalCard.setVisibility(View.VISIBLE);
@@ -365,6 +468,36 @@ public class MainActivity extends Activity {
             editedApprovalText = "";
             approvalCard.setVisibility(View.GONE);
         }
+    }
+
+    private String externalStatus(Message.Status status) {
+        if (status == null) return "";
+        switch (status) {
+            case DRAFT: return "DRAFT";
+            case PENDING_APPROVAL: return "NOT SENT";
+            case SENDING: return "SENDING";
+            case SENT: return "SENT";
+            case DELIVERED: return "DELIVERED";
+            case FAILED: return "FAILED";
+            case CANCELLED: return "CANCELLED";
+            default: return "";
+        }
+    }
+
+    private void updateTranscript(TextView view, final ScrollView scroll, String value) {
+        boolean follow = isNearBottom(scroll);
+        view.setText(value == null ? "" : value);
+        if (follow) {
+            scroll.post(new Runnable() {
+                @Override public void run() { scroll.fullScroll(View.FOCUS_DOWN); }
+            });
+        }
+    }
+
+    private boolean isNearBottom(ScrollView scroll) {
+        if (scroll == null || scroll.getChildCount() == 0) return true;
+        View child = scroll.getChildAt(0);
+        return scroll.getScrollY() + scroll.getHeight() >= child.getHeight() - dp(56);
     }
 
     private int statusColor(String value) {
@@ -394,6 +527,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        handler.removeCallbacks(flushInputTurnRunnable);
         if (runtime != null) stopRuntime();
         super.onDestroy();
     }
