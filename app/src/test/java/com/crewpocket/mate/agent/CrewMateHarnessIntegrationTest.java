@@ -36,12 +36,13 @@ public class CrewMateHarnessIntegrationTest {
         CrewMateAgentSpec spec = new CrewMateAgentSpec();
         List<String> names = new ArrayList<String>();
         for (ToolSpec tool : spec.tools()) names.add(tool.name());
-        assertEquals(5, names.size());
+        assertEquals(6, names.size());
         assertTrue(names.contains("find_contact"));
         assertTrue(names.contains("get_conversation"));
         assertTrue(names.contains("draft_message"));
         assertTrue(names.contains("send_message"));
         assertTrue(names.contains("request_user_input"));
+        assertTrue(names.contains("complete_task"));
     }
 
     @Test
@@ -115,6 +116,37 @@ public class CrewMateHarnessIntegrationTest {
         assertTrue(tools.approvePending(null));
         assertFalse(tools.approvePending(null));
         assertEquals(1, backend.sendCount());
+        backend.shutdown();
+    }
+
+    @Test
+    public void completeTaskStoresOutcomeAndCompletedState() {
+        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
+        CommunicationSession session = new CommunicationSession();
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
+        execute(tools.registry(), call("find", "find_contact", map("query", "John", "goal", "Confirm dinner time")));
+        ToolResult result = execute(tools.registry(), call("done", "complete_task", map("summary", "John confirmed dinner tomorrow at 7 PM.")));
+        assertTrue(result.success());
+        assertEquals("done", result.callId());
+        assertEquals(CommunicationSession.Status.COMPLETED, session.status());
+        assertEquals("John confirmed dinner tomorrow at 7 PM.", session.outcomeSummary());
+        backend.shutdown();
+    }
+
+    @Test
+    public void completeTaskIsRejectedWhileSendAwaitsApproval() {
+        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
+        CommunicationSession session = new CommunicationSession();
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
+        execute(tools.registry(), call("find", "find_contact", map("query", "John", "goal", "Confirm dinner")));
+        execute(tools.registry(), call("draft", "draft_message", map("content", "Dinner tomorrow?")));
+        tools.registry().execute(call("send", "send_message", map("content", "Dinner tomorrow?")), new ToolExecutor.Completion() {
+            @Override public void complete(ToolResult result) {}
+        });
+        ToolResult result = execute(tools.registry(), call("done", "complete_task", map("summary", "Done")));
+        assertFalse(result.success());
+        assertEquals("APPROVAL_PENDING", result.errorCode());
+        assertEquals(CommunicationSession.Status.WAITING_FOR_APPROVAL, session.status());
         backend.shutdown();
     }
 
