@@ -41,8 +41,8 @@ public interface MessagingBackend {
     }
 
     interface SendCallback {
-        /** Provider accepted/created the outbound message. This is not a read receipt. */
-        void onSent(String providerMessageId);
+        /** Provider accepted/created the outbound message. Despite the legacy name, this is not a read receipt. */
+        void onDelivered(String providerMessageId);
         void onReply(RemoteMessage reply);
         void onError(String message);
     }
