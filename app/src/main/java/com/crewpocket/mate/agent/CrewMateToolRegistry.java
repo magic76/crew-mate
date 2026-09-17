@@ -75,6 +75,7 @@ public final class CrewMateToolRegistry {
                         session.setGoal(goal);
                         session.setOutcomeSummary("");
                         session.setDelegationAuthorized(false);
+                        session.setUserDirectControl(false);
                         session.setStatus(CommunicationSession.Status.THINKING);
                         notifyChanged();
                         Map<String, Object> payload = new LinkedHashMap<String, Object>();
@@ -203,6 +204,11 @@ public final class CrewMateToolRegistry {
         String content = arg(call, "content");
         PendingSend automatic = null;
         synchronized (this) {
+            if (session.userDirectControl()) {
+                completion.complete(ToolResult.failure(call.id(), "USER_DIRECT_CONTROL",
+                        "The user is speaking to the other person directly. Do not send until control returns to Mate."));
+                return;
+            }
             if (pendingSend != null && !pendingSend.consumed) {
                 completion.complete(ToolResult.failure(call.id(), "APPROVAL_PENDING", "Another message is awaiting user approval"));
                 return;
@@ -244,6 +250,7 @@ public final class CrewMateToolRegistry {
     public boolean approvePending(String editedContent) {
         final PendingSend approved;
         synchronized (this) {
+            if (session.userDirectControl()) return false;
             if (pendingSend == null || pendingSend.consumed) return false;
             approved = pendingSend;
             approved.consumed = true;
@@ -291,6 +298,11 @@ public final class CrewMateToolRegistry {
                 Message message = new Message(reply.id, Message.Sender.OTHER_PERSON, "MATE",
                         reply.content, reply.timestamp, Message.Status.RECEIVED);
                 session.addMessage(message);
+                if (session.userDirectControl()) {
+                    session.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
+                    notifyChanged();
+                    return;
+                }
                 session.setStatus(CommunicationSession.Status.THINKING);
                 notifyChanged();
                 if (listener != null) listener.onExternalReply(session, message);
