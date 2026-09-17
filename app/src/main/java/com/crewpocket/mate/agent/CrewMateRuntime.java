@@ -4,6 +4,7 @@ import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.PendingApproval;
+import com.crewpocket.mate.model.SpeechAudience;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
 import com.magic76.crew.agent.AgentEvent;
 import com.magic76.crew.agent.AgentHarness;
@@ -29,6 +30,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private final AgentHarness harness;
     private final Listener listener;
     private volatile boolean closed;
+    private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
 
     public CrewMateRuntime(ModelSession modelSession, MessagingBackend backend, Listener listener) {
         this(new CommunicationSession(), modelSession, backend, listener);
@@ -46,6 +48,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public CommunicationSession session() { return session; }
     public List<AgentTraceRecorder.TraceEntry> trace() { return traceRecorder.snapshot(); }
     public String serializedTrace() { return traceRecorder.serialize(); }
+    public SpeechAudience speechAudience() { return speechAudience; }
+
+    public void setSpeechAudience(SpeechAudience audience) {
+        speechAudience = audience == null ? SpeechAudience.MATE_HANDLING : audience;
+    }
 
     public void start() {
         closed = false;
@@ -127,7 +134,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         onExternalReply(session, message);
     }
 
-    /** Input transcription is display/state only; Gemini already received the corresponding audio. */
+    /** Private input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
         if (closed || session.userDirectControl()) return;
         String value = text == null ? "" : text.trim();
@@ -137,6 +144,17 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
             session.setPendingUserQuestion("");
             session.setStatus(CommunicationSession.Status.THINKING);
         }
+        notifyChanged();
+    }
+
+    /** External live speech is visible product state but is not submitted again because Gemini heard the audio. */
+    public void recordExternalTranscript(String text) {
+        if (closed || session.userDirectControl()) return;
+        String value = text == null ? "" : text.trim();
+        if (value.isEmpty()) return;
+        String person = session.targetPerson().isEmpty() ? "Other person" : session.targetPerson();
+        session.addMessage(new Message(Message.Sender.OTHER_PERSON, "MATE", value, Message.Status.RECEIVED));
+        session.setStatus(CommunicationSession.Status.THINKING);
         notifyChanged();
     }
 
@@ -199,7 +217,12 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private void commitModelTurn() {
         String completed = modelTurn.take();
         if (completed.isEmpty()) return;
-        session.addMessage(new Message(Message.Sender.MATE, "USER", completed, Message.Status.INFO));
+        if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+            String recipient = session.targetPerson().isEmpty() ? "OTHER_PERSON" : session.targetPerson();
+            session.addMessage(new Message(Message.Sender.MATE, recipient, completed, Message.Status.INFO));
+        } else {
+            session.addMessage(new Message(Message.Sender.MATE, "USER", completed, Message.Status.INFO));
+        }
         notifyChanged();
     }
 
