@@ -66,7 +66,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     /** Used for typed/private control paths. Live microphone audio stays inside the Gemini adapter. */
     public void submitPrivateText(String text) {
-        if (closed) return;
+        if (closed || session.userDirectControl()) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         recordUserTranscript(value);
@@ -75,7 +75,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     /** Rehydrates model context after a background reply without creating a fake private user message. */
     public void resumePersistedTask() {
-        if (closed) return;
+        if (closed || session.userDirectControl()) return;
         StringBuilder context = new StringBuilder();
         context.append("RESUME_DELEGATED_COMMUNICATION_TASK\n")
                 .append("Target: ").append(session.targetPerson()).append("\n")
@@ -96,10 +96,18 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         }
         context.append("Continue the delegated task yourself if the next step is routine and within scope. "
                 + "If a new consequential decision is required, call request_user_input. "
-                + "If the goal is achieved, call complete_task.");
+                + "If the goal is achieved, call complete_task. Do not resend any message already present in the timeline.");
         session.setStatus(CommunicationSession.Status.THINKING);
         notifyChanged();
         harness.submitText(context.toString());
+    }
+
+    /** Called only after the user explicitly presses 'hand back to Mate'. */
+    public void resumeAfterUserTakeover() {
+        if (closed) return;
+        session.setUserDirectControl(false);
+        notifyChanged();
+        resumePersistedTask();
     }
 
     /** Feed a provider watch reply into the same shared Harness runtime; never starts a second loop. */
@@ -109,6 +117,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         Message message = new Message(reply.id, Message.Sender.OTHER_PERSON, "MATE",
                 reply.content, reply.timestamp, Message.Status.RECEIVED);
         session.addMessage(message);
+        if (session.userDirectControl()) {
+            session.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
+            notifyChanged();
+            return;
+        }
         session.setStatus(CommunicationSession.Status.THINKING);
         notifyChanged();
         onExternalReply(session, message);
@@ -116,7 +129,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     /** Input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
-        if (closed) return;
+        if (closed || session.userDirectControl()) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
@@ -127,7 +140,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         notifyChanged();
     }
 
-    public boolean approvePending(String editedContent) { return !closed && tools.approvePending(editedContent); }
+    public boolean approvePending(String editedContent) { return !closed && !session.userDirectControl() && tools.approvePending(editedContent); }
     public boolean cancelPending() { return !closed && tools.cancelPending(); }
 
     @Override
@@ -205,6 +218,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     @Override
     public void onExternalReply(CommunicationSession changed, Message message) {
         if (closed) return;
+        if (changed.userDirectControl()) {
+            changed.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
+            notifyChanged();
+            return;
+        }
         notifyChanged();
         emitStatus("Thinking");
         String person = changed.targetPerson().isEmpty() ? "OTHER_PERSON" : changed.targetPerson();
