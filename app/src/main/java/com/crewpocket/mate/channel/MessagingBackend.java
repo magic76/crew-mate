@@ -4,6 +4,10 @@ import java.util.List;
 
 /** Provider boundary. Telegram/LINE/email adapters implement this without changing the agent loop. */
 public interface MessagingBackend {
+    enum ChannelMode { IN_PERSON, REMOTE }
+
+    default ChannelMode channelMode() { return ChannelMode.REMOTE; }
+
     final class Contact {
         public final String id;
         public final String displayName;
