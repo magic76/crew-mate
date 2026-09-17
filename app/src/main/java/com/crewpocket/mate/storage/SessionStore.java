@@ -88,6 +88,7 @@ public final class SessionStore {
         root.put("goal", session.goal());
         root.put("outcome_summary", session.outcomeSummary());
         root.put("delegation_authorized", session.delegationAuthorized());
+        root.put("user_direct_control", session.userDirectControl());
         root.put("status", session.status().name());
         root.put("pending_user_question", session.pendingUserQuestion());
         root.put("updated_at", session.updatedAt());
@@ -114,6 +115,7 @@ public final class SessionStore {
             session.setGoal(root.optString("goal"));
             session.setOutcomeSummary(root.optString("outcome_summary"));
             session.setDelegationAuthorized(root.optBoolean("delegation_authorized", false));
+            session.setUserDirectControl(root.optBoolean("user_direct_control", false));
             session.setPendingUserQuestion(root.optString("pending_user_question"));
 
             JSONArray messages = root.optJSONArray("messages");
