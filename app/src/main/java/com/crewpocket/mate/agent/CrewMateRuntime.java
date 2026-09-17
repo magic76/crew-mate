@@ -50,8 +50,12 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public String serializedTrace() { return traceRecorder.serialize(); }
     public SpeechAudience speechAudience() { return speechAudience; }
 
-    public void setSpeechAudience(SpeechAudience audience) {
-        speechAudience = audience == null ? SpeechAudience.MATE_HANDLING : audience;
+    public synchronized void setSpeechAudience(SpeechAudience audience) {
+        SpeechAudience next = audience == null ? SpeechAudience.MATE_HANDLING : audience;
+        if (speechAudience == next) return;
+        // Finish any visible spoken model turn under the audience that actually heard it.
+        commitModelTurn();
+        speechAudience = next;
     }
 
     public void start() {
@@ -109,11 +113,17 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         harness.submitText(context.toString());
     }
 
-    /** Called only after the user explicitly presses 'hand back to Mate'. */
-    public void resumeAfterUserTakeover() {
+    /** Clear direct-control state without inventing a remote/provider event. */
+    public void releaseUserDirectControl() {
         if (closed) return;
         session.setUserDirectControl(false);
         notifyChanged();
+    }
+
+    /** Remote-mode continuation after the user explicitly returns control to Mate. */
+    public void resumeAfterUserTakeover() {
+        if (closed) return;
+        releaseUserDirectControl();
         resumePersistedTask();
     }
 
@@ -136,7 +146,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     /** Private input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
-        if (closed || session.userDirectControl()) return;
+        if (closed || session.userDirectControl() || speechAudience != SpeechAudience.PRIVATE_TO_MATE) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
@@ -148,8 +158,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     }
 
     /** External live speech is visible product state but is not submitted again because Gemini heard the audio. */
-    public void recordExternalTranscript(String text) {
-        if (closed || session.userDirectControl()) return;
+    public void recordExternalSpeechTranscript(String text) {
+        if (closed || session.userDirectControl() || speechAudience != SpeechAudience.EXTERNAL_WITH_MATE) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         String person = session.targetPerson().isEmpty() ? "Other person" : session.targetPerson();
@@ -167,7 +177,10 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (event == null) return;
         switch (event.type()) {
             case MODEL_TEXT:
-                if (!closed) modelTurn.append(event.text());
+                if (!closed && (speechAudience == SpeechAudience.PRIVATE_TO_MATE
+                        || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE)) {
+                    modelTurn.append(event.text());
+                }
                 break;
             case TOOL_REQUESTED:
                 if (!closed) commitModelTurn();
@@ -220,10 +233,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             String recipient = session.targetPerson().isEmpty() ? "OTHER_PERSON" : session.targetPerson();
             session.addMessage(new Message(Message.Sender.MATE, recipient, completed, Message.Status.INFO));
-        } else {
+            notifyChanged();
+        } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             session.addMessage(new Message(Message.Sender.MATE, "USER", completed, Message.Status.INFO));
+            notifyChanged();
         }
-        notifyChanged();
     }
 
     @Override public void onSessionChanged(CommunicationSession changed) {
