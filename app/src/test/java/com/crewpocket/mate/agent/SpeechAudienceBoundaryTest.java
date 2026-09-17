@@ -44,6 +44,26 @@ public class SpeechAudienceBoundaryTest {
     }
 
     @Test
+    public void typedPrivateBriefWorksWhileMicIsOff() {
+        CommunicationSession session = new CommunicationSession();
+        RecordingModelSession model = new RecordingModelSession();
+        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, noOpRuntimeListener());
+        runtime.setSpeechAudience(SpeechAudience.MATE_HANDLING);
+        runtime.start();
+
+        runtime.submitPrivateText("幫我問能不能延後退房");
+
+        Message message = onlyMessage(session.messages());
+        assertEquals(Message.Sender.USER, message.sender);
+        assertEquals("MATE", message.recipient);
+        assertEquals("幫我問能不能延後退房", message.content());
+
+        runtime.close();
+        backend.shutdown();
+    }
+
+    @Test
     public void privateTranscriptRoutesUserToMate() {
         CommunicationSession session = new CommunicationSession();
         RecordingModelSession model = new RecordingModelSession();

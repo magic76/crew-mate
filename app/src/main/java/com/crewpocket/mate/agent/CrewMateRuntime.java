@@ -75,12 +75,17 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (!closed) harness.interrupt();
     }
 
-    /** Used for typed/private control paths. Live microphone audio stays inside the Gemini adapter. */
+    /** Typed private instruction is independent of the live microphone audience. */
     public void submitPrivateText(String text) {
         if (closed || session.userDirectControl()) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
-        recordUserTranscript(value);
+        session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
+        if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
+            session.setPendingUserQuestion("");
+            session.setStatus(CommunicationSession.Status.THINKING);
+        }
+        notifyChanged();
         harness.submitText(value);
     }
 
