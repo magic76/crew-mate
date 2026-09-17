@@ -976,7 +976,9 @@ public class MainActivity extends Activity {
         if (!session.pendingUserQuestion().isEmpty()) task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
         if (!session.outcomeSummary().isEmpty()) task.append("\n\n結果：").append(session.outcomeSummary());
         taskText.setText(task.toString());
-        externalSectionTitle.setText("對外紀錄 · Mate ↔ " + person);
+        externalSectionTitle.setText(isInPersonMode()
+                ? "第 2 步 · 對話紀錄 · Mate ↔ " + person
+                : "對外紀錄 · Mate ↔ " + person);
         privateSectionTitle.setText("第 1 步 · 私人交代");
         renderTimelines(session, person);
 
@@ -1147,8 +1149,14 @@ public class MainActivity extends Activity {
                 privateCount++;
             }
         }
-        if (externalCount == 0) addPlaceholder(externalTimeline, "Mate 對外送出的內容與對方回覆會完整出現在這裡。");
-        if (privateCount == 0) addPlaceholder(privateTimeline, "這裡只放你交代給 Mate 的內容，不會原文直接送給對方。");
+        if (externalCount == 0) {
+            addPlaceholder(externalTimeline, isInPersonMode()
+                    ? "把手機交給對方後，對方與 Mate 的語音內容會出現在這裡。"
+                    : "Mate 對外送出的內容與對方回覆會完整出現在這裡。");
+        }
+        if (privateCount == 0) {
+            addPlaceholder(privateTimeline, "你用語音或文字交代給 Mate 的內容會留在這裡，不會原文直接給對方。");
+        }
         if (followExternal) scrollToBottom(externalScroll);
         if (followPrivate) scrollToBottom(privateScroll);
     }
