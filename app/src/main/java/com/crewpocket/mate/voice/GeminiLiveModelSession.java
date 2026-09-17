@@ -66,6 +66,7 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile boolean speaking;
     private volatile boolean userAudioEnabled = true;
     private volatile boolean playbackEnabled = true;
+    private volatile String clientContext = "";
     private AudioRecord recorder;
     private AudioTrack player;
     private Thread micThread;
@@ -176,12 +177,13 @@ public final class GeminiLiveModelSession implements ModelSession {
     public void interrupt() {
         flushPlayback();
         if (userAudioEnabled) {
-            try { sendUserAudio(new byte[3200]); } catch (Exception ignored) {}
+            try { sendAudioStreamEnd(); } catch (Exception ignored) {}
         }
     }
 
     @Override
     public synchronized void close() {
+        if (running && setupReady && userAudioEnabled) sendAudioStreamEnd();
         running = false;
         setupReady = false;
         stopAudio();
@@ -198,14 +200,15 @@ public final class GeminiLiveModelSession implements ModelSession {
     public boolean isPlaybackEnabled() { return playbackEnabled; }
 
     /**
-     * Product-level audience boundary. Leaving PRIVATE_TO_MATE releases AudioRecord entirely,
-     * so Android no longer shows the microphone as active and no local audio is captured.
+     * Controls whether local microphone audio is part of Gemini Live. Disabling sends the official
+     * audioStreamEnd signal and releases AudioRecord. Re-enabling starts a new audio stream.
      */
     public synchronized void setUserAudioEnabled(boolean enabled) {
         if (userAudioEnabled == enabled) {
             if (enabled && running && setupReady && !recording) startInputAudio();
             return;
         }
+        if (!enabled && running && setupReady && userAudioEnabled) sendAudioStreamEnd();
         userAudioEnabled = enabled;
         if (!enabled) {
             stopInputAudio();
@@ -216,7 +219,7 @@ public final class GeminiLiveModelSession implements ModelSession {
         }
     }
 
-    /** Prevent private Mate speech from leaking into a user-direct conversation. */
+    /** Prevent Mate speech from leaking while the user has taken over. */
     public synchronized void setPlaybackEnabled(boolean enabled) {
         playbackEnabled = enabled;
         if (!enabled) {
@@ -225,6 +228,39 @@ public final class GeminiLiveModelSession implements ModelSession {
         } else if (running && setupReady) {
             ensurePlayer();
         }
+    }
+
+    /**
+     * Appends audience control context without completing a turn. This is used before opening a
+     * microphone stream so Gemini knows whether the next speaker is the private user or the external person.
+     */
+    public synchronized void setClientContext(String value) {
+        clientContext = value == null ? "" : value.trim();
+        if (running && setupReady) sendClientContextNow();
+    }
+
+    private void sendClientContextNow() {
+        if (!running || !setupReady || webSocket == null || clientContext.isEmpty()) return;
+        try {
+            JSONObject turn = new JSONObject()
+                    .put("role", "user")
+                    .put("parts", new JSONArray().put(new JSONObject().put("text", clientContext)));
+            JSONObject client = new JSONObject()
+                    .put("turns", new JSONArray().put(turn))
+                    .put("turnComplete", false);
+            webSocket.send(new JSONObject().put("clientContent", client).toString());
+        } catch (Exception e) {
+            fail("Unable to set live audience context: " + e.getMessage(), e);
+        }
+    }
+
+    private void sendAudioStreamEnd() {
+        if (!running || !setupReady || webSocket == null) return;
+        try {
+            webSocket.send(new JSONObject()
+                    .put("realtimeInput", new JSONObject().put("audioStreamEnd", true))
+                    .toString());
+        } catch (Exception ignored) {}
     }
 
     private JSONObject buildSetup() throws Exception {
@@ -290,6 +326,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
             if (response.has("setupComplete") || response.has("setup_complete")) {
                 setupReady = true;
+                sendClientContextNow();
                 if (playbackEnabled) ensurePlayer();
                 if (userAudioEnabled) startInputAudio();
                 status(userAudioEnabled ? "Listening" : "Ready");
