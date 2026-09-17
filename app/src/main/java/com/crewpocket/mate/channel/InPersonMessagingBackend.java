@@ -10,6 +10,9 @@ import java.util.Locale;
  */
 public final class InPersonMessagingBackend implements MessagingBackend {
     @Override
+    public ChannelMode channelMode() { return ChannelMode.IN_PERSON; }
+
+    @Override
     public void findContact(String query, FindCallback callback) {
         if (callback == null) return;
         String name = query == null ? "" : query.trim();
