@@ -244,37 +244,6 @@ public final class GeminiLiveModelSession implements ModelSession {
         if (running && setupReady) sendClientContextNow();
     }
 
-    /**
-     * Controls whether local microphone audio is part of Gemini Live. Disabling sends the official
-     * audioStreamEnd signal and releases AudioRecord. Re-enabling starts a new audio stream.
-     */
-    public synchronized void setUserAudioEnabled(boolean enabled) {
-        if (userAudioEnabled == enabled) {
-            if (enabled && running && setupReady && !recording) startInputAudio();
-            return;
-        }
-        if (!enabled && running && setupReady && userAudioEnabled) sendAudioStreamEnd();
-        userAudioEnabled = enabled;
-        if (!enabled) {
-            stopInputAudio();
-            if (running && setupReady) status("Ready");
-        } else if (running && setupReady) {
-            startInputAudio();
-            status("Listening");
-        }
-    }
-
-    /** Prevent Mate speech from leaking while the user has taken over. */
-    public synchronized void setPlaybackEnabled(boolean enabled) {
-        playbackEnabled = enabled;
-        if (!enabled) {
-            releasePlayer();
-            setSpeaking(false);
-        } else if (running && setupReady) {
-            ensurePlayer();
-        }
-    }
-
     private String buildAudienceContext() {
         String prefix = "AUDIENCE_MODE=" + speechAudience.name() + "\nCHANNEL_MODE=" + channelMode + "\n";
         switch (speechAudience) {
