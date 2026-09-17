@@ -26,6 +26,7 @@ import android.widget.Toast;
 
 import com.crewpocket.mate.agent.CrewMateRuntime;
 import com.crewpocket.mate.channel.FakeMessagingBackend;
+import com.crewpocket.mate.channel.InPersonMessagingBackend;
 import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.channel.TelegramMessagingBackend;
 import com.crewpocket.mate.config.AppConfig;
@@ -63,7 +64,7 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final TurnTextAccumulator inputTurn = new TurnTextAccumulator();
     private final Runnable flushInputTurnRunnable = new Runnable() {
-        @Override public void run() { flushUserInputTurn(); }
+        @Override public void run() { flushInputTurn(); }
     };
 
     private Button primaryButton;
@@ -90,6 +91,8 @@ public class MainActivity extends Activity {
     private SessionStore sessionStore;
     private CommunicationSession viewedSession;
     private SpeechAudience speechAudience = SpeechAudience.IDLE;
+    private SpeechAudience pendingInputAudience = SpeechAudience.IDLE;
+    private SpeechAudience privateReturnAudience = SpeechAudience.MATE_HANDLING;
     private SpeechAudience pendingAudienceAfterPermission = SpeechAudience.PRIVATE_TO_MATE;
     private boolean pendingStartAfterPermission;
     private boolean resumeAfterTakeoverOnStart;
@@ -241,7 +244,7 @@ public class MainActivity extends Activity {
         modeActions.addView(primaryButton, new LinearLayout.LayoutParams(0, dp(52), 1.45f));
         directButton = actionButton("我要自己說", direct);
         directButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { enterUserDirectMode(); }
+            @Override public void onClick(View v) { handleSecondaryAction(); }
         });
         LinearLayout.LayoutParams directLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
         directLp.setMargins(dp(8), 0, 0, 0);
@@ -347,9 +350,16 @@ public class MainActivity extends Activity {
             return;
         }
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE && runtime != null) {
-            flushUserInputTurn();
-            applyAudience(SpeechAudience.MATE_HANDLING);
-            status("Mate handling", green);
+            flushInputTurn();
+            SpeechAudience destination = privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    ? SpeechAudience.EXTERNAL_WITH_MATE
+                    : SpeechAudience.MATE_HANDLING;
+            applyAudience(destination);
+            status(destination == SpeechAudience.EXTERNAL_WITH_MATE ? "External live" : "Mate handling", green);
+            return;
+        }
+        if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+            enterPrivateSupplement();
             return;
         }
         if (viewedSession != null && viewedSession.status() == CommunicationSession.Status.COMPLETED) {
@@ -357,9 +367,13 @@ public class MainActivity extends Activity {
             ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
             return;
         }
+        if (runtime != null && isInPersonMode() && viewedSession != null
+                && !viewedSession.targetPerson().isEmpty()) {
+            handToOtherPerson();
+            return;
+        }
         if (runtime != null) {
-            applyAudience(SpeechAudience.PRIVATE_TO_MATE);
-            status("Listening", accent);
+            enterPrivateSupplement();
             return;
         }
         if (viewedSession != null
@@ -368,13 +382,43 @@ public class MainActivity extends Activity {
             ensureRuntime(SpeechAudience.MATE_HANDLING);
             return;
         }
+        privateReturnAudience = SpeechAudience.MATE_HANDLING;
         ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
+    }
+
+    private void handleSecondaryAction() {
+        if (speechAudience == SpeechAudience.MATE_HANDLING && isInPersonMode()) {
+            enterPrivateSupplement();
+            return;
+        }
+        enterUserDirectMode();
+    }
+
+    private void enterPrivateSupplement() {
+        if (runtime == null) {
+            ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
+            return;
+        }
+        privateReturnAudience = speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                ? SpeechAudience.EXTERNAL_WITH_MATE
+                : SpeechAudience.MATE_HANDLING;
+        applyAudience(SpeechAudience.PRIVATE_TO_MATE);
+        status("Listening", accent);
+    }
+
+    private void handToOtherPerson() {
+        if (runtime == null || viewedSession == null || viewedSession.targetPerson().isEmpty()) return;
+        viewedSession.setUserDirectControl(false);
+        sessionStore.save(viewedSession);
+        privateReturnAudience = SpeechAudience.EXTERNAL_WITH_MATE;
+        applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+        status("External live", green);
     }
 
     private void enterUserDirectMode() {
         if (viewedSession == null || viewedSession.targetPerson().isEmpty()
                 || viewedSession.status() == CommunicationSession.Status.COMPLETED) return;
-        flushUserInputTurn();
+        flushInputTurn();
         handler.removeCallbacks(flushInputTurnRunnable);
         inputTurn.clear();
         if (runtime != null) {
@@ -393,6 +437,16 @@ public class MainActivity extends Activity {
         if (viewedSession == null) return;
         viewedSession.setUserDirectControl(false);
         sessionStore.save(viewedSession);
+        if (isInPersonMode()) {
+            if (runtime != null) {
+                runtime.releaseUserDirectControl();
+                applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+                status("External live", green);
+            } else {
+                ensureRuntime(SpeechAudience.EXTERNAL_WITH_MATE);
+            }
+            return;
+        }
         applyAudience(SpeechAudience.MATE_HANDLING);
         if (runtime != null) {
             runtime.resumeAfterUserTakeover();
@@ -404,15 +458,16 @@ public class MainActivity extends Activity {
     }
 
     private void applyAudience(SpeechAudience audience) {
-        speechAudience = audience == null ? SpeechAudience.IDLE : audience;
-        if (speechAudience != SpeechAudience.PRIVATE_TO_MATE) {
+        SpeechAudience next = audience == null ? SpeechAudience.IDLE : audience;
+        if (speechAudience != next && speechAudience.routesMicrophoneToMate()) flushInputTurn();
+        speechAudience = next;
+        if (!speechAudience.routesMicrophoneToMate()) {
             handler.removeCallbacks(flushInputTurnRunnable);
             inputTurn.clear();
+            pendingInputAudience = SpeechAudience.IDLE;
         }
-        if (modelSession != null) {
-            modelSession.setUserAudioEnabled(speechAudience.routesMicrophoneToMate());
-            modelSession.setPlaybackEnabled(speechAudience.playsMateVoice());
-        }
+        if (runtime != null) runtime.setSpeechAudience(speechAudience);
+        if (modelSession != null) modelSession.setSpeechAudience(speechAudience);
         renderAudience(viewedSession);
         renderControls(viewedSession);
     }
@@ -440,14 +495,24 @@ public class MainActivity extends Activity {
     }
 
     private MessagingBackend createMessagingBackend() {
-        if (AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))) {
+        String provider = AppConfig.getMessagingProvider(this);
+        if (AppConfig.PROVIDER_TELEGRAM.equals(provider)) {
             return new TelegramMessagingBackend(this, AppConfig.getTelegramBotToken(this));
         }
-        return new FakeMessagingBackend();
+        if (AppConfig.PROVIDER_FAKE.equals(provider)) return new FakeMessagingBackend();
+        return new InPersonMessagingBackend();
+    }
+
+    private boolean isInPersonMode() {
+        if (messagingBackend != null) {
+            return messagingBackend.channelMode() == MessagingBackend.ChannelMode.IN_PERSON;
+        }
+        return AppConfig.PROVIDER_IN_PERSON.equals(AppConfig.getMessagingProvider(this));
     }
 
     private void startRuntime(String key, final SpeechAudience initialAudience) {
         inputTurn.clear();
+        pendingInputAudience = SpeechAudience.IDLE;
         handler.removeCallbacks(flushInputTurnRunnable);
         final CommunicationSession liveSession;
         final boolean resumeExisting = shouldResume(viewedSession);
@@ -478,10 +543,15 @@ public class MainActivity extends Activity {
                 });
             }
 
-            @Override public void onInputTranscript(final String value) {
+            @Override public void onInputTranscript(final String value, final SpeechAudience audience) {
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
-                        if (speechAudience != SpeechAudience.PRIVATE_TO_MATE) return;
+                        if (audience != SpeechAudience.PRIVATE_TO_MATE
+                                && audience != SpeechAudience.EXTERNAL_WITH_MATE) return;
+                        if (pendingInputAudience != SpeechAudience.IDLE && pendingInputAudience != audience) {
+                            flushInputTurn();
+                        }
+                        pendingInputAudience = audience;
                         inputTurn.append(value);
                         handler.removeCallbacks(flushInputTurnRunnable);
                         handler.postDelayed(flushInputTurnRunnable, INPUT_TRANSCRIPT_SETTLE_MS);
@@ -493,9 +563,12 @@ public class MainActivity extends Activity {
                 if (!speaking) return;
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
-                        if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
-                            flushUserInputTurn();
-                            status("Mate is speaking…", accent);
+                        if (speechAudience == SpeechAudience.PRIVATE_TO_MATE
+                                || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+                            flushInputTurn();
+                            status(speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                                    ? "Mate speaking externally"
+                                    : "Mate is speaking…", accent);
                         }
                     }
                 });
@@ -507,8 +580,8 @@ public class MainActivity extends Activity {
                 });
             }
         });
-        modelSession.setUserAudioEnabled(speechAudience.routesMicrophoneToMate());
-        modelSession.setPlaybackEnabled(speechAudience.playsMateVoice());
+        modelSession.setChannelMode(messagingBackend.channelMode().name());
+        modelSession.setSpeechAudience(speechAudience);
 
         runtime = new CrewMateRuntime(liveSession, modelSession, messagingBackend, new CrewMateRuntime.Listener() {
             @Override public void onSessionChanged(final CommunicationSession session) {
@@ -538,12 +611,13 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
                         if (speechAudience == SpeechAudience.USER_DIRECT) return;
-                        if (value != null && !"Thinking".equals(value)) flushUserInputTurn();
+                        if (value != null && !"Thinking".equals(value)) flushInputTurn();
                         status(value, statusColor(value));
                     }
                 });
             }
         });
+        runtime.setSpeechAudience(speechAudience);
 
         status("Connecting…", amber);
         renderSession(liveSession);
@@ -591,16 +665,23 @@ public class MainActivity extends Activity {
                 && session.status() != CommunicationSession.Status.ERROR;
     }
 
-    private void flushUserInputTurn() {
+    private void flushInputTurn() {
         handler.removeCallbacks(flushInputTurnRunnable);
+        SpeechAudience audience = pendingInputAudience;
+        pendingInputAudience = SpeechAudience.IDLE;
         String completed = inputTurn.take();
-        if (completed.isEmpty() || speechAudience != SpeechAudience.PRIVATE_TO_MATE) return;
+        if (completed.isEmpty()) return;
         CrewMateRuntime target = runtime;
-        if (target != null) target.recordUserTranscript(completed);
+        if (target == null) return;
+        if (audience == SpeechAudience.PRIVATE_TO_MATE) {
+            target.recordUserTranscript(completed);
+        } else if (audience == SpeechAudience.EXTERNAL_WITH_MATE) {
+            target.recordExternalSpeechTranscript(completed);
+        }
     }
 
     private void stopRuntime() {
-        if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) flushUserInputTurn();
+        if (speechAudience.routesMicrophoneToMate()) flushInputTurn();
         CrewMateRuntime target = runtime;
         CommunicationSession session = target == null ? viewedSession : target.session();
         boolean shouldHandoff = shouldHandoffToBackground(session);
@@ -695,28 +776,35 @@ public class MainActivity extends Activity {
         final EditText api = dialogInput("Gemini API key", true);
         api.setText(AppConfig.getApiKey(this));
         box.addView(api, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
-        final boolean[] telegram = new boolean[]{AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))};
-        final Button provider = actionButton(telegram[0] ? "Provider: Telegram" : "Provider: Fake", Color.rgb(71, 85, 105));
+        final String[] providerValue = new String[]{AppConfig.getMessagingProvider(this)};
+        final Button provider = actionButton(providerLabel(providerValue[0]), Color.rgb(71, 85, 105));
         LinearLayout.LayoutParams providerLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
         providerLp.setMargins(0, dp(10), 0, 0);
         box.addView(provider, providerLp);
         final EditText token = dialogInput("Telegram bot token", true);
         token.setText(AppConfig.getTelegramBotToken(this));
-        token.setVisibility(telegram[0] ? View.VISIBLE : View.GONE);
+        token.setVisibility(AppConfig.PROVIDER_TELEGRAM.equals(providerValue[0]) ? View.VISIBLE : View.GONE);
         LinearLayout.LayoutParams tokenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
         tokenLp.setMargins(0, dp(10), 0, 0);
         box.addView(token, tokenLp);
-        TextView note = new TextView(this);
-        note.setText("Telegram 對象必須先跟 Bot 傳過 /start，Mate 才能找到並與他對話。");
+        final TextView note = new TextView(this);
+        note.setText(providerNote(providerValue[0]));
         note.setTextColor(Color.DKGRAY);
         note.setTextSize(11);
         note.setPadding(0, dp(8), 0, 0);
         box.addView(note);
         provider.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                telegram[0] = !telegram[0];
-                provider.setText(telegram[0] ? "Provider: Telegram" : "Provider: Fake");
-                token.setVisibility(telegram[0] ? View.VISIBLE : View.GONE);
+                if (AppConfig.PROVIDER_IN_PERSON.equals(providerValue[0])) {
+                    providerValue[0] = AppConfig.PROVIDER_TELEGRAM;
+                } else if (AppConfig.PROVIDER_TELEGRAM.equals(providerValue[0])) {
+                    providerValue[0] = AppConfig.PROVIDER_FAKE;
+                } else {
+                    providerValue[0] = AppConfig.PROVIDER_IN_PERSON;
+                }
+                provider.setText(providerLabel(providerValue[0]));
+                token.setVisibility(AppConfig.PROVIDER_TELEGRAM.equals(providerValue[0]) ? View.VISIBLE : View.GONE);
+                note.setText(providerNote(providerValue[0]));
             }
         });
         new AlertDialog.Builder(this)
@@ -726,13 +814,28 @@ public class MainActivity extends Activity {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         AppConfig.setApiKey(MainActivity.this, api.getText().toString());
                         AppConfig.setTelegramBotToken(MainActivity.this, token.getText().toString());
-                        AppConfig.setMessagingProvider(MainActivity.this,
-                                telegram[0] ? AppConfig.PROVIDER_TELEGRAM : AppConfig.PROVIDER_FAKE);
+                        AppConfig.setMessagingProvider(MainActivity.this, providerValue[0]);
                         renderSession(viewedSession);
                     }
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private String providerLabel(String provider) {
+        if (AppConfig.PROVIDER_TELEGRAM.equals(provider)) return "Provider: Telegram";
+        if (AppConfig.PROVIDER_FAKE.equals(provider)) return "Provider: Fake";
+        return "Provider: In person";
+    }
+
+    private String providerNote(String provider) {
+        if (AppConfig.PROVIDER_TELEGRAM.equals(provider)) {
+            return "Telegram 對象必須先跟 Bot 傳過 /start，Mate 才能找到並與他對話。";
+        }
+        if (AppConfig.PROVIDER_FAKE.equals(provider)) {
+            return "Fake provider 只供測試 remote messaging 與 approval flow。";
+        }
+        return "In person：先私下交代，再把手機交給對方；Mate 會直接用 Gemini Live 說話，不會呼叫 remote send_message。";
     }
 
     private EditText dialogInput(String hint, boolean secret) {
@@ -761,9 +864,16 @@ public class MainActivity extends Activity {
 
         String person = session.targetPerson().isEmpty() ? "正在找對象…" : session.targetPerson();
         String goal = session.goal().isEmpty() ? "正在理解你的目標…" : session.goal();
-        String delegation = session.delegationAuthorized()
-                ? "Mate 已接手一般往返；重要承諾仍會回來問你"
-                : "第一則對外訊息會先讓你確認";
+        String delegation;
+        if (isInPersonMode()) {
+            delegation = session.targetPerson().isEmpty()
+                    ? "Mate 正在理解任務與對象"
+                    : "✓ Mate 已理解任務；按「交給對方」後直接用語音對談";
+        } else {
+            delegation = session.delegationAuthorized()
+                    ? "Mate 已接手一般往返；重要承諾仍會回來問你"
+                    : "第一則對外訊息會先讓你確認";
+        }
         StringBuilder task = new StringBuilder();
         task.append(person).append("\n").append(goal).append("\n\n").append(delegation);
         if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會自主送新訊息。");
@@ -800,15 +910,24 @@ public class MainActivity extends Activity {
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             styleAudience(Color.rgb(40, 35, 86), accent);
             audienceTitle.setText("🔒 你現在只在跟 Mate 說");
-            audienceDetail.setText("這段只會成為 Mate 的私人指示，不會直接傳給 " + person + "。說完後按「完成交代／完成補充」。");
+            audienceDetail.setText("這段只會成為 Mate 的私人指示，不會直接傳給 " + person + "。");
+        } else if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+            styleAudience(Color.rgb(18, 56, 48), green);
+            audienceTitle.setText("🎙 " + person + " 現在正在跟 Mate 說");
+            audienceDetail.setText("手機交給對方即可。對方說的內容與 Mate 的回答會進入公開對話紀錄。");
         } else if (speechAudience == SpeechAudience.USER_DIRECT) {
             styleAudience(Color.rgb(83, 45, 20), direct);
             audienceTitle.setText("🎙 你現在自己跟 " + person + " 說");
-            audienceDetail.setText("Mate 已停止聽取你的麥克風，也不能自主送新訊息。說完按「交回 Mate」。");
+            audienceDetail.setText("Mate 不會聽，也不會自行發言或送出訊息。說完按「交回 Mate」。");
         } else if (speechAudience == SpeechAudience.MATE_HANDLING) {
             styleAudience(Color.rgb(18, 56, 48), green);
-            audienceTitle.setText("✓ Mate 正在處理");
-            audienceDetail.setText("你目前沒有在對外說話。要新增條件請按「補充給 Mate」；要親自跟 " + person + " 說請按「我要自己說」。");
+            if (isInPersonMode() && session != null && !session.targetPerson().isEmpty()) {
+                audienceTitle.setText("✓ Mate 已理解任務");
+                audienceDetail.setText("可以按「交給對方」把手機交出去；或先按「補充給 Mate」新增條件。");
+            } else {
+                audienceTitle.setText("✓ Mate 正在處理");
+                audienceDetail.setText("你目前沒有在對外說話。需要時可以補充條件或自己接手。");
+            }
         } else {
             styleAudience(surface2, muted);
             audienceTitle.setText("尚未開始交代");
@@ -842,23 +961,39 @@ public class MainActivity extends Activity {
             return;
         }
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
-            primaryButton.setText(session.targetPerson().isEmpty() ? "完成交代" : "完成補充");
+            primaryButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    ? "交回對方"
+                    : (session.targetPerson().isEmpty() ? "完成交代" : "完成補充"));
             primaryButton.setBackground(roundRect(accent, 11));
-        } else if (runtime == null && (session.status() == CommunicationSession.Status.REPLY_RECEIVED
+            directButton.setVisibility(View.GONE);
+            return;
+        }
+        if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+            primaryButton.setText("🔒 補充給 Mate");
+            primaryButton.setBackground(roundRect(accent, 11));
+            directButton.setVisibility(View.VISIBLE);
+            directButton.setText("我要自己說");
+            directButton.setBackground(roundRect(direct, 11));
+            return;
+        }
+        if (runtime == null && (session.status() == CommunicationSession.Status.REPLY_RECEIVED
                 || session.status() == CommunicationSession.Status.STOPPED)) {
             primaryButton.setText("讓 Mate 繼續");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
             primaryButton.setText("🔒 回答 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
+        } else if (isInPersonMode() && !session.targetPerson().isEmpty()) {
+            primaryButton.setText("交給對方");
+            primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else {
             primaryButton.setText("🔒 補充給 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
         }
         boolean canTakeOver = !session.targetPerson().isEmpty();
         directButton.setVisibility(canTakeOver ? View.VISIBLE : View.GONE);
-        directButton.setText("我要自己說");
-        directButton.setBackground(roundRect(direct, 11));
+        directButton.setText(isInPersonMode() ? "🔒 補充給 Mate" : "我要自己說");
+        directButton.setBackground(roundRect(isInPersonMode() ? accent : direct, 11));
     }
 
     private void renderTimelines(CommunicationSession session, String person) {
@@ -959,7 +1094,7 @@ public class MainActivity extends Activity {
         if (value.contains("approval") || value.contains("input") || value.contains("Connecting")) return amber;
         if (value.contains("Sending") || value.contains("Listening") || value.contains("reply")
                 || value.contains("Reply") || value.contains("Completed") || value.contains("Waiting for reply")
-                || value.contains("Mate handling")) return green;
+                || value.contains("Mate handling") || value.contains("External live")) return green;
         if (value.contains("User direct")) return direct;
         if (value.contains("Error") || value.contains("failed")) return red;
         return muted;
@@ -975,6 +1110,8 @@ public class MainActivity extends Activity {
         if (value.contains("Listening")) return "🔒 正在聽你對 Mate 說";
         if (value.contains("Mate is speaking")) return "Mate 正在回覆你";
         if (value.contains("Mate handling")) return "Mate 正在處理";
+        if (value.contains("External live")) return "🎙 對方正在跟 Mate 說";
+        if (value.contains("Mate speaking externally")) return "Mate 正在對對方說";
         if (value.contains("User direct")) return "🎙 你已接手跟對方說";
         if (value.contains("Connecting")) return "連線中";
         if (value.contains("Completed")) return "已完成";
