@@ -3,6 +3,7 @@ package com.crewpocket.mate.agent;
 import com.crewpocket.mate.channel.FakeMessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
+import com.crewpocket.mate.model.SpeechAudience;
 import com.magic76.crew.agent.ModelEvent;
 import com.magic76.crew.agent.ModelSession;
 import com.magic76.crew.agent.SessionConfig;
@@ -19,6 +20,7 @@ public class CrewMateTurnAggregationTest {
         FakeMessagingBackend backend = new FakeMessagingBackend(0L);
         CommunicationSession session = new CommunicationSession();
         CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, null);
+        runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
         runtime.start();
 
         model.emit(ModelEvent.text("好的"));
@@ -40,6 +42,7 @@ public class CrewMateTurnAggregationTest {
         FakeMessagingBackend backend = new FakeMessagingBackend(0L);
         CommunicationSession session = new CommunicationSession();
         CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, null);
+        runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
         runtime.start();
 
         model.emit(ModelEvent.text("This is an unfinished"));

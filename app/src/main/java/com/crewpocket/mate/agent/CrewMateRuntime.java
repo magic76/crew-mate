@@ -4,6 +4,7 @@ import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.PendingApproval;
+import com.crewpocket.mate.model.SpeechAudience;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
 import com.magic76.crew.agent.AgentEvent;
 import com.magic76.crew.agent.AgentHarness;
@@ -29,6 +30,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private final AgentHarness harness;
     private final Listener listener;
     private volatile boolean closed;
+    private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
 
     public CrewMateRuntime(ModelSession modelSession, MessagingBackend backend, Listener listener) {
         this(new CommunicationSession(), modelSession, backend, listener);
@@ -46,6 +48,15 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public CommunicationSession session() { return session; }
     public List<AgentTraceRecorder.TraceEntry> trace() { return traceRecorder.snapshot(); }
     public String serializedTrace() { return traceRecorder.serialize(); }
+    public SpeechAudience speechAudience() { return speechAudience; }
+
+    public synchronized void setSpeechAudience(SpeechAudience audience) {
+        SpeechAudience next = audience == null ? SpeechAudience.MATE_HANDLING : audience;
+        if (speechAudience == next) return;
+        // Finish any visible spoken model turn under the audience that actually heard it.
+        commitModelTurn();
+        speechAudience = next;
+    }
 
     public void start() {
         closed = false;
@@ -66,7 +77,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     /** Used for typed/private control paths. Live microphone audio stays inside the Gemini adapter. */
     public void submitPrivateText(String text) {
-        if (closed) return;
+        if (closed || session.userDirectControl()) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         recordUserTranscript(value);
@@ -75,7 +86,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     /** Rehydrates model context after a background reply without creating a fake private user message. */
     public void resumePersistedTask() {
-        if (closed) return;
+        if (closed || session.userDirectControl()) return;
         StringBuilder context = new StringBuilder();
         context.append("RESUME_DELEGATED_COMMUNICATION_TASK\n")
                 .append("Target: ").append(session.targetPerson()).append("\n")
@@ -96,10 +107,24 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         }
         context.append("Continue the delegated task yourself if the next step is routine and within scope. "
                 + "If a new consequential decision is required, call request_user_input. "
-                + "If the goal is achieved, call complete_task.");
+                + "If the goal is achieved, call complete_task. Do not resend any message already present in the timeline.");
         session.setStatus(CommunicationSession.Status.THINKING);
         notifyChanged();
         harness.submitText(context.toString());
+    }
+
+    /** Clear direct-control state without inventing a remote/provider event. */
+    public void releaseUserDirectControl() {
+        if (closed) return;
+        session.setUserDirectControl(false);
+        notifyChanged();
+    }
+
+    /** Remote-mode continuation after the user explicitly returns control to Mate. */
+    public void resumeAfterUserTakeover() {
+        if (closed) return;
+        releaseUserDirectControl();
+        resumePersistedTask();
     }
 
     /** Feed a provider watch reply into the same shared Harness runtime; never starts a second loop. */
@@ -109,14 +134,19 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         Message message = new Message(reply.id, Message.Sender.OTHER_PERSON, "MATE",
                 reply.content, reply.timestamp, Message.Status.RECEIVED);
         session.addMessage(message);
+        if (session.userDirectControl()) {
+            session.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
+            notifyChanged();
+            return;
+        }
         session.setStatus(CommunicationSession.Status.THINKING);
         notifyChanged();
         onExternalReply(session, message);
     }
 
-    /** Input transcription is display/state only; Gemini already received the corresponding audio. */
+    /** Private input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
-        if (closed) return;
+        if (closed || session.userDirectControl() || speechAudience != SpeechAudience.PRIVATE_TO_MATE) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
@@ -127,7 +157,18 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         notifyChanged();
     }
 
-    public boolean approvePending(String editedContent) { return !closed && tools.approvePending(editedContent); }
+    /** External live speech is visible product state but is not submitted again because Gemini heard the audio. */
+    public void recordExternalSpeechTranscript(String text) {
+        if (closed || session.userDirectControl() || speechAudience != SpeechAudience.EXTERNAL_WITH_MATE) return;
+        String value = text == null ? "" : text.trim();
+        if (value.isEmpty()) return;
+        String person = session.targetPerson().isEmpty() ? "Other person" : session.targetPerson();
+        session.addMessage(new Message(Message.Sender.OTHER_PERSON, "MATE", value, Message.Status.RECEIVED));
+        session.setStatus(CommunicationSession.Status.THINKING);
+        notifyChanged();
+    }
+
+    public boolean approvePending(String editedContent) { return !closed && !session.userDirectControl() && tools.approvePending(editedContent); }
     public boolean cancelPending() { return !closed && tools.cancelPending(); }
 
     @Override
@@ -136,7 +177,10 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (event == null) return;
         switch (event.type()) {
             case MODEL_TEXT:
-                if (!closed) modelTurn.append(event.text());
+                if (!closed && (speechAudience == SpeechAudience.PRIVATE_TO_MATE
+                        || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE)) {
+                    modelTurn.append(event.text());
+                }
                 break;
             case TOOL_REQUESTED:
                 if (!closed) commitModelTurn();
@@ -186,8 +230,14 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private void commitModelTurn() {
         String completed = modelTurn.take();
         if (completed.isEmpty()) return;
-        session.addMessage(new Message(Message.Sender.MATE, "USER", completed, Message.Status.INFO));
-        notifyChanged();
+        if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+            String recipient = session.targetPerson().isEmpty() ? "OTHER_PERSON" : session.targetPerson();
+            session.addMessage(new Message(Message.Sender.MATE, recipient, completed, Message.Status.INFO));
+            notifyChanged();
+        } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
+            session.addMessage(new Message(Message.Sender.MATE, "USER", completed, Message.Status.INFO));
+            notifyChanged();
+        }
     }
 
     @Override public void onSessionChanged(CommunicationSession changed) {
@@ -205,6 +255,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     @Override
     public void onExternalReply(CommunicationSession changed, Message message) {
         if (closed) return;
+        if (changed.userDirectControl()) {
+            changed.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
+            notifyChanged();
+            return;
+        }
         notifyChanged();
         emitStatus("Thinking");
         String person = changed.targetPerson().isEmpty() ? "OTHER_PERSON" : changed.targetPerson();

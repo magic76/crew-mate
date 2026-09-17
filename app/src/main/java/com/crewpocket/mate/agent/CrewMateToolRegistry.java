@@ -75,6 +75,7 @@ public final class CrewMateToolRegistry {
                         session.setGoal(goal);
                         session.setOutcomeSummary("");
                         session.setDelegationAuthorized(false);
+                        session.setUserDirectControl(false);
                         session.setStatus(CommunicationSession.Status.THINKING);
                         notifyChanged();
                         Map<String, Object> payload = new LinkedHashMap<String, Object>();
@@ -131,6 +132,11 @@ public final class CrewMateToolRegistry {
         registry.register("draft_message", new ToolExecutor() {
             @Override public void execute(ToolCall call, Completion completion) {
                 String content = arg(call, "content");
+                if (backend.channelMode() == MessagingBackend.ChannelMode.IN_PERSON) {
+                    completion.complete(ToolResult.failure(call.id(), "IN_PERSON_LIVE_SPEECH",
+                            "In-person conversations are spoken aloud. Do not draft or send a remote message."));
+                    return;
+                }
                 if (currentContact() == null) {
                     completion.complete(ToolResult.failure(call.id(), "CONTACT_REQUIRED", "Call find_contact first"));
                     return;
@@ -203,6 +209,16 @@ public final class CrewMateToolRegistry {
         String content = arg(call, "content");
         PendingSend automatic = null;
         synchronized (this) {
+            if (session.userDirectControl()) {
+                completion.complete(ToolResult.failure(call.id(), "USER_DIRECT_CONTROL",
+                        "The user is speaking to the other person directly. Do not send until control returns to Mate."));
+                return;
+            }
+            if (backend.channelMode() == MessagingBackend.ChannelMode.IN_PERSON) {
+                completion.complete(ToolResult.failure(call.id(), "IN_PERSON_LIVE_SPEECH",
+                        "The other person is physically present. Speak aloud through Gemini Live instead of send_message."));
+                return;
+            }
             if (pendingSend != null && !pendingSend.consumed) {
                 completion.complete(ToolResult.failure(call.id(), "APPROVAL_PENDING", "Another message is awaiting user approval"));
                 return;
@@ -244,6 +260,7 @@ public final class CrewMateToolRegistry {
     public boolean approvePending(String editedContent) {
         final PendingSend approved;
         synchronized (this) {
+            if (session.userDirectControl()) return false;
             if (pendingSend == null || pendingSend.consumed) return false;
             approved = pendingSend;
             approved.consumed = true;
@@ -254,7 +271,6 @@ public final class CrewMateToolRegistry {
             approved.approval.updateState(PendingApproval.State.APPROVED);
             approved.message.updateContent(content);
             approved.message.updateStatus(Message.Status.SENDING);
-            session.setDelegationAuthorized(true);
             session.setStatus(CommunicationSession.Status.SENDING);
             notifyChanged();
         }
@@ -272,7 +288,10 @@ public final class CrewMateToolRegistry {
         backend.sendMessage(contact, send.message.content(), new MessagingBackend.SendCallback() {
             @Override public void onDelivered(String providerMessageId) {
                 send.message.updateStatus(Message.Status.SENT);
-                if (send.approval != null) send.approval.updateState(PendingApproval.State.SENT);
+                if (send.approval != null) {
+                    send.approval.updateState(PendingApproval.State.SENT);
+                    session.setDelegationAuthorized(true);
+                }
                 session.setPendingApproval(null);
                 session.setStatus(CommunicationSession.Status.WAITING_FOR_REPLY);
                 synchronized (CrewMateToolRegistry.this) {
@@ -291,6 +310,11 @@ public final class CrewMateToolRegistry {
                 Message message = new Message(reply.id, Message.Sender.OTHER_PERSON, "MATE",
                         reply.content, reply.timestamp, Message.Status.RECEIVED);
                 session.addMessage(message);
+                if (session.userDirectControl()) {
+                    session.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
+                    notifyChanged();
+                    return;
+                }
                 session.setStatus(CommunicationSession.Status.THINKING);
                 notifyChanged();
                 if (listener != null) listener.onExternalReply(session, message);

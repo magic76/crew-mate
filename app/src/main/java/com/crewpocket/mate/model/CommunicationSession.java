@@ -25,6 +25,7 @@ public final class CommunicationSession {
     private String goal = "";
     private String outcomeSummary = "";
     private boolean delegationAuthorized;
+    private boolean userDirectControl;
     private Status status = Status.THINKING;
     private final List<Message> messages = new ArrayList<Message>();
     private PendingApproval pendingApproval;
@@ -42,6 +43,7 @@ public final class CommunicationSession {
     public synchronized String goal() { return goal; }
     public synchronized String outcomeSummary() { return outcomeSummary; }
     public synchronized boolean delegationAuthorized() { return delegationAuthorized; }
+    public synchronized boolean userDirectControl() { return userDirectControl; }
     public synchronized Status status() { return status; }
     public synchronized PendingApproval pendingApproval() { return pendingApproval; }
     public synchronized String pendingUserQuestion() { return pendingUserQuestion; }
@@ -56,6 +58,7 @@ public final class CommunicationSession {
     public synchronized void setGoal(String value) { goal = clean(value); touch(); }
     public synchronized void setOutcomeSummary(String value) { outcomeSummary = clean(value); touch(); }
     public synchronized void setDelegationAuthorized(boolean value) { delegationAuthorized = value; touch(); }
+    public synchronized void setUserDirectControl(boolean value) { userDirectControl = value; touch(); }
 
     public synchronized void setStatus(Status value) {
         if (value != null) { status = value; touch(); }

@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 public final class AppConfig {
+    public static final String PROVIDER_IN_PERSON = "in_person";
     public static final String PROVIDER_FAKE = "fake";
     public static final String PROVIDER_TELEGRAM = "telegram";
 
@@ -32,13 +33,17 @@ public final class AppConfig {
     }
 
     public static String getMessagingProvider(Context context) {
-        String value = prefs(context).getString(KEY_MESSAGING_PROVIDER, PROVIDER_FAKE);
-        return PROVIDER_TELEGRAM.equals(value) ? PROVIDER_TELEGRAM : PROVIDER_FAKE;
+        String value = prefs(context).getString(KEY_MESSAGING_PROVIDER, PROVIDER_IN_PERSON);
+        if (PROVIDER_TELEGRAM.equals(value)) return PROVIDER_TELEGRAM;
+        if (PROVIDER_FAKE.equals(value)) return PROVIDER_FAKE;
+        return PROVIDER_IN_PERSON;
     }
 
     public static void setMessagingProvider(Context context, String value) {
-        prefs(context).edit().putString(KEY_MESSAGING_PROVIDER,
-                PROVIDER_TELEGRAM.equals(value) ? PROVIDER_TELEGRAM : PROVIDER_FAKE).apply();
+        String normalized = PROVIDER_IN_PERSON;
+        if (PROVIDER_TELEGRAM.equals(value)) normalized = PROVIDER_TELEGRAM;
+        else if (PROVIDER_FAKE.equals(value)) normalized = PROVIDER_FAKE;
+        prefs(context).edit().putString(KEY_MESSAGING_PROVIDER, normalized).apply();
     }
 
     public static String getTelegramBotToken(Context context) {

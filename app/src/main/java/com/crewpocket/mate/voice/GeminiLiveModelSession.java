@@ -10,6 +10,7 @@ import android.media.AudioTrack;
 import android.media.MediaRecorder;
 import android.util.Base64;
 
+import com.crewpocket.mate.model.SpeechAudience;
 import com.magic76.crew.agent.ModelEvent;
 import com.magic76.crew.agent.ModelSession;
 import com.magic76.crew.agent.SessionConfig;
@@ -44,7 +45,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     public interface UiListener {
         void onStatus(String status);
-        void onInputTranscript(String text);
+        void onInputTranscript(String text, SpeechAudience audience);
         void onSpeakingChanged(boolean speaking);
         void onError(String message);
     }
@@ -64,6 +65,10 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile boolean setupReady;
     private volatile boolean recording;
     private volatile boolean speaking;
+    private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
+    private volatile boolean userAudioEnabled;
+    private volatile boolean playbackEnabled;
+    private volatile String channelMode = "REMOTE";
     private AudioRecord recorder;
     private AudioTrack player;
     private Thread micThread;
@@ -128,6 +133,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     @Override
     public void sendUserAudio(byte[] audioBytes) {
+        if (!userAudioEnabled) return;
         if (!running || !setupReady || webSocket == null || audioBytes == null || audioBytes.length == 0) return;
         try {
             JSONObject audio = new JSONObject()
@@ -172,13 +178,14 @@ public final class GeminiLiveModelSession implements ModelSession {
     @Override
     public void interrupt() {
         flushPlayback();
-        try {
-            sendUserAudio(new byte[3200]);
-        } catch (Exception ignored) {}
+        if (userAudioEnabled) {
+            try { sendAudioStreamEnd(); } catch (Exception ignored) {}
+        }
     }
 
     @Override
     public synchronized void close() {
+        if (running && setupReady && userAudioEnabled) sendAudioStreamEnd();
         running = false;
         setupReady = false;
         stopAudio();
@@ -191,6 +198,99 @@ public final class GeminiLiveModelSession implements ModelSession {
     }
 
     public boolean isRunning() { return running; }
+    public boolean isUserAudioEnabled() { return userAudioEnabled; }
+    public boolean isPlaybackEnabled() { return playbackEnabled; }
+    public SpeechAudience speechAudience() { return speechAudience; }
+
+    /**
+     * Authoritative physical speech boundary. Every audience transition ends the previous microphone
+     * stream, releases AudioRecord, flushes playback, sends explicit audience/channel context, then
+     * starts a fresh microphone stream only for PRIVATE_TO_MATE or EXTERNAL_WITH_MATE.
+     */
+    public synchronized void setSpeechAudience(SpeechAudience audience) {
+        SpeechAudience next = audience == null ? SpeechAudience.MATE_HANDLING : audience;
+        if (speechAudience == next) {
+            userAudioEnabled = next.routesMicrophoneToMate();
+            playbackEnabled = next.playsMateVoice();
+            if (running && setupReady) {
+                if (playbackEnabled) ensurePlayer(); else releasePlayer();
+                if (userAudioEnabled && !recording) startInputAudio();
+            }
+            return;
+        }
+
+        boolean previousMic = userAudioEnabled;
+        if (previousMic && running && setupReady) sendAudioStreamEnd();
+        if (previousMic || recording || recorder != null) stopInputAudio();
+        flushPlayback();
+        releasePlayer();
+        setSpeaking(false);
+
+        speechAudience = next;
+        userAudioEnabled = next.routesMicrophoneToMate();
+        playbackEnabled = next.playsMateVoice();
+
+        if (running && setupReady) {
+            sendClientContextNow();
+            if (playbackEnabled) ensurePlayer();
+            if (userAudioEnabled) startInputAudio();
+            status(userAudioEnabled ? "Listening" : "Ready");
+        }
+    }
+
+    public synchronized void setChannelMode(String value) {
+        String normalized = value == null ? "" : value.trim().toUpperCase();
+        channelMode = "IN_PERSON".equals(normalized) ? "IN_PERSON" : "REMOTE";
+        if (running && setupReady) sendClientContextNow();
+    }
+
+    private String buildAudienceContext() {
+        String prefix = "AUDIENCE_MODE=" + speechAudience.name() + "\nCHANNEL_MODE=" + channelMode + "\n";
+        switch (speechAudience) {
+            case PRIVATE_TO_MATE:
+                return prefix
+                        + "Next microphone speech is the USER speaking privately to Mate. "
+                        + "Treat it as private instruction. Do not expose or copy the private brief to the other person.";
+            case EXTERNAL_WITH_MATE:
+                return prefix
+                        + "Next microphone speech is the OTHER PERSON speaking directly with Mate in an in-person conversation. "
+                        + "Do not treat it as a private user instruction. Respond directly to that person, keep the user's private goal and constraints active, "
+                        + "and do not call remote send_message for spoken replies.";
+            case USER_DIRECT:
+                return prefix
+                        + "The user personally took over the human conversation. Do not speak and do not send messages until control returns.";
+            case MATE_HANDLING:
+                return prefix
+                        + "There is no microphone speaker. Continue delegated work only through normal product events/tools when appropriate.";
+            case IDLE:
+            default:
+                return prefix + "No live speaker is assigned.";
+        }
+    }
+
+    private void sendClientContextNow() {
+        if (!running || !setupReady || webSocket == null) return;
+        try {
+            JSONObject turn = new JSONObject()
+                    .put("role", "user")
+                    .put("parts", new JSONArray().put(new JSONObject().put("text", buildAudienceContext())));
+            JSONObject client = new JSONObject()
+                    .put("turns", new JSONArray().put(turn))
+                    .put("turnComplete", false);
+            webSocket.send(new JSONObject().put("clientContent", client).toString());
+        } catch (Exception e) {
+            fail("Unable to set live audience context: " + e.getMessage(), e);
+        }
+    }
+
+    private void sendAudioStreamEnd() {
+        if (!running || !setupReady || webSocket == null) return;
+        try {
+            webSocket.send(new JSONObject()
+                    .put("realtimeInput", new JSONObject().put("audioStreamEnd", true))
+                    .toString());
+        } catch (Exception ignored) {}
+    }
 
     private JSONObject buildSetup() throws Exception {
         JSONObject setup = new JSONObject();
@@ -255,8 +355,10 @@ public final class GeminiLiveModelSession implements ModelSession {
 
             if (response.has("setupComplete") || response.has("setup_complete")) {
                 setupReady = true;
-                status("Listening");
-                startAudio();
+                sendClientContextNow();
+                if (playbackEnabled) ensurePlayer();
+                if (userAudioEnabled) startInputAudio();
+                status(userAudioEnabled ? "Listening" : "Ready");
                 return;
             }
 
@@ -296,9 +398,9 @@ public final class GeminiLiveModelSession implements ModelSession {
 
         JSONObject input = server.optJSONObject("inputTranscription");
         if (input == null) input = server.optJSONObject("input_transcription");
-        if (input != null) {
+        if (input != null && speechAudience.routesMicrophoneToMate()) {
             String value = input.optString("text", "").trim();
-            if (!value.isEmpty() && uiListener != null) uiListener.onInputTranscript(value);
+            if (!value.isEmpty() && uiListener != null) uiListener.onInputTranscript(value, speechAudience);
         }
 
         JSONObject output = server.optJSONObject("outputTranscription");
@@ -321,11 +423,14 @@ public final class GeminiLiveModelSession implements ModelSession {
                     if (inline != null && inline.optString("mimeType", "").startsWith("audio/pcm")) {
                         final byte[] pcm = Base64.decode(inline.optString("data", ""), Base64.DEFAULT);
                         if (pcm.length > 0) {
-                            setSpeaking(true);
                             emit(ModelEvent.audio(pcm));
-                            audioWriter.execute(new Runnable() {
-                                @Override public void run() { writeAudio(pcm); }
-                            });
+                            if (playbackEnabled) {
+                                ensurePlayer();
+                                setSpeaking(true);
+                                audioWriter.execute(new Runnable() {
+                                    @Override public void run() { writeAudio(pcm); }
+                                });
+                            }
                         }
                     }
                 }
@@ -335,12 +440,12 @@ public final class GeminiLiveModelSession implements ModelSession {
         if (server.optBoolean("turnComplete", server.optBoolean("turn_complete", false))) {
             setSpeaking(false);
             emit(ModelEvent.turnCompleted());
-            status("Listening");
+            status(userAudioEnabled ? "Listening" : "Ready");
         }
     }
 
-    private synchronized void startAudio() {
-        if (!running || recording) return;
+    private synchronized void startInputAudio() {
+        if (!running || !setupReady || !userAudioEnabled || recording) return;
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             fail("Microphone permission is required.", null);
             return;
@@ -357,6 +462,16 @@ public final class GeminiLiveModelSession implements ModelSession {
                     INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, inputBuffer);
         }
 
+        recording = true;
+        recorder.startRecording();
+        micThread = new Thread(new Runnable() {
+            @Override public void run() { captureLoop(); }
+        }, "CrewMateMic");
+        micThread.start();
+    }
+
+    private synchronized void ensurePlayer() {
+        if (!running || !setupReady || !playbackEnabled || player != null) return;
         int minOutput = AudioTrack.getMinBufferSize(OUTPUT_RATE,
                 AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
         player = new AudioTrack.Builder()
@@ -373,20 +488,20 @@ public final class GeminiLiveModelSession implements ModelSession {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build();
         player.play();
-
-        recording = true;
-        recorder.startRecording();
-        micThread = new Thread(new Runnable() {
-            @Override public void run() { captureLoop(); }
-        }, "CrewMateMic");
-        micThread.start();
     }
 
     private void captureLoop() {
         byte[] buffer = new byte[3200];
-        while (running && recording && recorder != null) {
-            int read = recorder.read(buffer, 0, buffer.length);
-            if (read <= 0) continue;
+        while (running && recording && userAudioEnabled) {
+            AudioRecord target = recorder;
+            if (target == null) break;
+            int read;
+            try {
+                read = target.read(buffer, 0, buffer.length);
+            } catch (Exception ignored) {
+                break;
+            }
+            if (read <= 0 || !userAudioEnabled) continue;
             byte[] frame = new byte[read];
             System.arraycopy(buffer, 0, frame, 0, read);
             sendUserAudio(frame);
@@ -396,32 +511,46 @@ public final class GeminiLiveModelSession implements ModelSession {
     private void writeAudio(byte[] pcm) {
         try {
             AudioTrack target = player;
-            if (running && target != null) target.write(pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
+            if (running && playbackEnabled && target != null) {
+                target.write(pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
+            }
         } catch (Exception ignored) {}
     }
 
-    private synchronized void stopAudio() {
+    private synchronized void stopInputAudio() {
         recording = false;
-        if (recorder != null) {
-            try { recorder.stop(); } catch (Exception ignored) {}
-            try { recorder.release(); } catch (Exception ignored) {}
-            recorder = null;
+        AudioRecord target = recorder;
+        recorder = null;
+        micThread = null;
+        if (target != null) {
+            try { target.stop(); } catch (Exception ignored) {}
+            try { target.release(); } catch (Exception ignored) {}
         }
-        if (player != null) {
-            try { player.pause(); player.flush(); player.stop(); } catch (Exception ignored) {}
-            try { player.release(); } catch (Exception ignored) {}
-            player = null;
+    }
+
+    private synchronized void releasePlayer() {
+        AudioTrack target = player;
+        player = null;
+        if (target != null) {
+            try { target.pause(); target.flush(); target.stop(); } catch (Exception ignored) {}
+            try { target.release(); } catch (Exception ignored) {}
         }
+    }
+
+    private synchronized void stopAudio() {
+        stopInputAudio();
+        releasePlayer();
         setSpeaking(false);
     }
 
-    private void flushPlayback() {
+    private synchronized void flushPlayback() {
         AudioTrack target = player;
         if (target == null) return;
         try { target.pause(); target.flush(); target.play(); } catch (Exception ignored) {}
     }
 
     private void setSpeaking(boolean value) {
+        if (!playbackEnabled) value = false;
         if (speaking == value) return;
         speaking = value;
         if (uiListener != null) uiListener.onSpeakingChanged(value);
