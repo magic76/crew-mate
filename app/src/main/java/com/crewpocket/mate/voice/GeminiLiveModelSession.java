@@ -10,6 +10,7 @@ import android.media.AudioTrack;
 import android.media.MediaRecorder;
 import android.util.Base64;
 
+import com.crewpocket.mate.model.SpeechAudience;
 import com.magic76.crew.agent.ModelEvent;
 import com.magic76.crew.agent.ModelSession;
 import com.magic76.crew.agent.SessionConfig;
@@ -44,7 +45,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     public interface UiListener {
         void onStatus(String status);
-        void onInputTranscript(String text);
+        void onInputTranscript(String text, SpeechAudience audience);
         void onSpeakingChanged(boolean speaking);
         void onError(String message);
     }
@@ -64,9 +65,10 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile boolean setupReady;
     private volatile boolean recording;
     private volatile boolean speaking;
-    private volatile boolean userAudioEnabled = true;
-    private volatile boolean playbackEnabled = true;
-    private volatile String clientContext = "";
+    private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
+    private volatile boolean userAudioEnabled;
+    private volatile boolean playbackEnabled;
+    private volatile String channelMode = "REMOTE";
     private AudioRecord recorder;
     private AudioTrack player;
     private Thread micThread;
@@ -198,6 +200,49 @@ public final class GeminiLiveModelSession implements ModelSession {
     public boolean isRunning() { return running; }
     public boolean isUserAudioEnabled() { return userAudioEnabled; }
     public boolean isPlaybackEnabled() { return playbackEnabled; }
+    public SpeechAudience speechAudience() { return speechAudience; }
+
+    /**
+     * Authoritative physical speech boundary. Every audience transition ends the previous microphone
+     * stream, releases AudioRecord, flushes playback, sends explicit audience/channel context, then
+     * starts a fresh microphone stream only for PRIVATE_TO_MATE or EXTERNAL_WITH_MATE.
+     */
+    public synchronized void setSpeechAudience(SpeechAudience audience) {
+        SpeechAudience next = audience == null ? SpeechAudience.MATE_HANDLING : audience;
+        if (speechAudience == next) {
+            userAudioEnabled = next.routesMicrophoneToMate();
+            playbackEnabled = next.playsMateVoice();
+            if (running && setupReady) {
+                if (playbackEnabled) ensurePlayer(); else releasePlayer();
+                if (userAudioEnabled && !recording) startInputAudio();
+            }
+            return;
+        }
+
+        boolean previousMic = userAudioEnabled;
+        if (previousMic && running && setupReady) sendAudioStreamEnd();
+        if (previousMic || recording || recorder != null) stopInputAudio();
+        flushPlayback();
+        releasePlayer();
+        setSpeaking(false);
+
+        speechAudience = next;
+        userAudioEnabled = next.routesMicrophoneToMate();
+        playbackEnabled = next.playsMateVoice();
+
+        if (running && setupReady) {
+            sendClientContextNow();
+            if (playbackEnabled) ensurePlayer();
+            if (userAudioEnabled) startInputAudio();
+            status(userAudioEnabled ? "Listening" : "Ready");
+        }
+    }
+
+    public synchronized void setChannelMode(String value) {
+        String normalized = value == null ? "" : value.trim().toUpperCase();
+        channelMode = "IN_PERSON".equals(normalized) ? "IN_PERSON" : "REMOTE";
+        if (running && setupReady) sendClientContextNow();
+    }
 
     /**
      * Controls whether local microphone audio is part of Gemini Live. Disabling sends the official
@@ -230,21 +275,36 @@ public final class GeminiLiveModelSession implements ModelSession {
         }
     }
 
-    /**
-     * Appends audience control context without completing a turn. This is used before opening a
-     * microphone stream so Gemini knows whether the next speaker is the private user or the external person.
-     */
-    public synchronized void setClientContext(String value) {
-        clientContext = value == null ? "" : value.trim();
-        if (running && setupReady) sendClientContextNow();
+    private String buildAudienceContext() {
+        String prefix = "AUDIENCE_MODE=" + speechAudience.name() + "\nCHANNEL_MODE=" + channelMode + "\n";
+        switch (speechAudience) {
+            case PRIVATE_TO_MATE:
+                return prefix
+                        + "Next microphone speech is the USER speaking privately to Mate. "
+                        + "Treat it as private instruction. Do not expose or copy the private brief to the other person.";
+            case EXTERNAL_WITH_MATE:
+                return prefix
+                        + "Next microphone speech is the OTHER PERSON speaking directly with Mate in an in-person conversation. "
+                        + "Do not treat it as a private user instruction. Respond directly to that person, keep the user's private goal and constraints active, "
+                        + "and do not call remote send_message for spoken replies.";
+            case USER_DIRECT:
+                return prefix
+                        + "The user personally took over the human conversation. Do not speak and do not send messages until control returns.";
+            case MATE_HANDLING:
+                return prefix
+                        + "There is no microphone speaker. Continue delegated work only through normal product events/tools when appropriate.";
+            case IDLE:
+            default:
+                return prefix + "No live speaker is assigned.";
+        }
     }
 
     private void sendClientContextNow() {
-        if (!running || !setupReady || webSocket == null || clientContext.isEmpty()) return;
+        if (!running || !setupReady || webSocket == null) return;
         try {
             JSONObject turn = new JSONObject()
                     .put("role", "user")
-                    .put("parts", new JSONArray().put(new JSONObject().put("text", clientContext)));
+                    .put("parts", new JSONArray().put(new JSONObject().put("text", buildAudienceContext())));
             JSONObject client = new JSONObject()
                     .put("turns", new JSONArray().put(turn))
                     .put("turnComplete", false);
@@ -369,9 +429,9 @@ public final class GeminiLiveModelSession implements ModelSession {
 
         JSONObject input = server.optJSONObject("inputTranscription");
         if (input == null) input = server.optJSONObject("input_transcription");
-        if (input != null && userAudioEnabled) {
+        if (input != null && speechAudience.routesMicrophoneToMate()) {
             String value = input.optString("text", "").trim();
-            if (!value.isEmpty() && uiListener != null) uiListener.onInputTranscript(value);
+            if (!value.isEmpty() && uiListener != null) uiListener.onInputTranscript(value, speechAudience);
         }
 
         JSONObject output = server.optJSONObject("outputTranscription");
