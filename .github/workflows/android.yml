@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, speech-audience-boundary ]
   pull_request:
     branches: [ main ]
 
