@@ -98,6 +98,7 @@ public class MainActivity extends Activity {
     private SpeechAudience privateReturnAudience = SpeechAudience.MATE_HANDLING;
     private SpeechAudience pendingAudienceAfterPermission = SpeechAudience.PRIVATE_TO_MATE;
     private boolean pendingStartAfterPermission;
+    private boolean pendingHandoffAfterPermission;
     private boolean resumeAfterTakeoverOnStart;
     private String editedApprovalText = "";
     private String pendingTypedBrief = "";
@@ -424,23 +425,23 @@ public class MainActivity extends Activity {
         String value = taskInput == null ? "" : taskInput.getText().toString().trim();
         if (value.isEmpty()) return;
         if (taskInput != null) taskInput.setText("");
-        privateReturnAudience = speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                ? SpeechAudience.EXTERNAL_WITH_MATE
-                : SpeechAudience.MATE_HANDLING;
         if (runtime == null) {
             pendingTypedBrief = value;
             ensureRuntime(SpeechAudience.MATE_HANDLING);
             return;
         }
-        if (speechAudience != SpeechAudience.PRIVATE_TO_MATE) {
-            applyAudience(SpeechAudience.PRIVATE_TO_MATE);
-        }
+
         runtime.submitPrivateText(value);
-        if (privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+
+        // Typed input is already private; do not turn the microphone on just to submit text.
+        if (speechAudience == SpeechAudience.PRIVATE_TO_MATE
+                && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
             status("External live", green);
-        } else {
+        } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             applyAudience(SpeechAudience.MATE_HANDLING);
+            status("Mate handling", green);
+        } else {
             status("Mate handling", green);
         }
     }
@@ -473,7 +474,12 @@ public class MainActivity extends Activity {
     }
 
     private void handToOtherPerson() {
-        if (runtime == null || viewedSession == null || viewedSession.targetPerson().isEmpty()) return;
+        if (runtime == null || viewedSession == null || !taskReady(viewedSession)) return;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingHandoffAfterPermission = true;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_AUDIO);
+            return;
+        }
         viewedSession.setUserDirectControl(false);
         sessionStore.save(viewedSession);
         privateReturnAudience = SpeechAudience.EXTERNAL_WITH_MATE;
@@ -1259,12 +1265,21 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_AUDIO) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED && pendingStartAfterPermission) {
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (granted && pendingHandoffAfterPermission) {
+                pendingHandoffAfterPermission = false;
+                handToOtherPerson();
+                return;
+            }
+            if (granted && pendingStartAfterPermission) {
                 pendingStartAfterPermission = false;
                 startRuntime(AppConfig.getApiKey(this), pendingAudienceAfterPermission);
-            } else {
-                pendingStartAfterPermission = false;
-                Toast.makeText(this, "Crew Mate 需要麥克風權限才能使用語音。", Toast.LENGTH_LONG).show();
+                return;
+            }
+            pendingHandoffAfterPermission = false;
+            pendingStartAfterPermission = false;
+            if (!granted) {
+                Toast.makeText(this, "開始語音對談需要麥克風權限。你仍可用文字設定任務。", Toast.LENGTH_LONG).show();
             }
         }
     }
