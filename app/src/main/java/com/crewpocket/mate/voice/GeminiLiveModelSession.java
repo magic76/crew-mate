@@ -64,6 +64,8 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile boolean setupReady;
     private volatile boolean recording;
     private volatile boolean speaking;
+    private volatile boolean userAudioEnabled = true;
+    private volatile boolean playbackEnabled = true;
     private AudioRecord recorder;
     private AudioTrack player;
     private Thread micThread;
@@ -128,6 +130,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     @Override
     public void sendUserAudio(byte[] audioBytes) {
+        if (!userAudioEnabled) return;
         if (!running || !setupReady || webSocket == null || audioBytes == null || audioBytes.length == 0) return;
         try {
             JSONObject audio = new JSONObject()
@@ -172,9 +175,9 @@ public final class GeminiLiveModelSession implements ModelSession {
     @Override
     public void interrupt() {
         flushPlayback();
-        try {
-            sendUserAudio(new byte[3200]);
-        } catch (Exception ignored) {}
+        if (userAudioEnabled) {
+            try { sendUserAudio(new byte[3200]); } catch (Exception ignored) {}
+        }
     }
 
     @Override
@@ -191,6 +194,22 @@ public final class GeminiLiveModelSession implements ModelSession {
     }
 
     public boolean isRunning() { return running; }
+    public boolean isUserAudioEnabled() { return userAudioEnabled; }
+    public boolean isPlaybackEnabled() { return playbackEnabled; }
+
+    /** Product-level audience boundary. Audio can keep recording locally while frames are discarded. */
+    public void setUserAudioEnabled(boolean enabled) {
+        userAudioEnabled = enabled;
+    }
+
+    /** Prevent private Mate speech from leaking into a user-direct conversation. */
+    public void setPlaybackEnabled(boolean enabled) {
+        playbackEnabled = enabled;
+        if (!enabled) {
+            flushPlayback();
+            setSpeaking(false);
+        }
+    }
 
     private JSONObject buildSetup() throws Exception {
         JSONObject setup = new JSONObject();
@@ -255,7 +274,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
             if (response.has("setupComplete") || response.has("setup_complete")) {
                 setupReady = true;
-                status("Listening");
+                status(userAudioEnabled ? "Listening" : "Ready");
                 startAudio();
                 return;
             }
@@ -296,7 +315,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
         JSONObject input = server.optJSONObject("inputTranscription");
         if (input == null) input = server.optJSONObject("input_transcription");
-        if (input != null) {
+        if (input != null && userAudioEnabled) {
             String value = input.optString("text", "").trim();
             if (!value.isEmpty() && uiListener != null) uiListener.onInputTranscript(value);
         }
@@ -321,11 +340,13 @@ public final class GeminiLiveModelSession implements ModelSession {
                     if (inline != null && inline.optString("mimeType", "").startsWith("audio/pcm")) {
                         final byte[] pcm = Base64.decode(inline.optString("data", ""), Base64.DEFAULT);
                         if (pcm.length > 0) {
-                            setSpeaking(true);
                             emit(ModelEvent.audio(pcm));
-                            audioWriter.execute(new Runnable() {
-                                @Override public void run() { writeAudio(pcm); }
-                            });
+                            if (playbackEnabled) {
+                                setSpeaking(true);
+                                audioWriter.execute(new Runnable() {
+                                    @Override public void run() { writeAudio(pcm); }
+                                });
+                            }
                         }
                     }
                 }
@@ -335,7 +356,7 @@ public final class GeminiLiveModelSession implements ModelSession {
         if (server.optBoolean("turnComplete", server.optBoolean("turn_complete", false))) {
             setSpeaking(false);
             emit(ModelEvent.turnCompleted());
-            status("Listening");
+            status(userAudioEnabled ? "Listening" : "Ready");
         }
     }
 
@@ -386,7 +407,7 @@ public final class GeminiLiveModelSession implements ModelSession {
         byte[] buffer = new byte[3200];
         while (running && recording && recorder != null) {
             int read = recorder.read(buffer, 0, buffer.length);
-            if (read <= 0) continue;
+            if (read <= 0 || !userAudioEnabled) continue;
             byte[] frame = new byte[read];
             System.arraycopy(buffer, 0, frame, 0, read);
             sendUserAudio(frame);
@@ -396,7 +417,9 @@ public final class GeminiLiveModelSession implements ModelSession {
     private void writeAudio(byte[] pcm) {
         try {
             AudioTrack target = player;
-            if (running && target != null) target.write(pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
+            if (running && playbackEnabled && target != null) {
+                target.write(pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
+            }
         } catch (Exception ignored) {}
     }
 
@@ -422,6 +445,7 @@ public final class GeminiLiveModelSession implements ModelSession {
     }
 
     private void setSpeaking(boolean value) {
+        if (!playbackEnabled) value = false;
         if (speaking == value) return;
         speaking = value;
         if (uiListener != null) uiListener.onSpeakingChanged(value);
