@@ -429,7 +429,7 @@ public class MainActivity extends Activity {
                 : SpeechAudience.MATE_HANDLING;
         if (runtime == null) {
             pendingTypedBrief = value;
-            ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
+            ensureRuntime(SpeechAudience.MATE_HANDLING);
             return;
         }
         if (speechAudience != SpeechAudience.PRIVATE_TO_MATE) {
@@ -551,7 +551,8 @@ public class MainActivity extends Activity {
             showSettings();
             return;
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (initialAudience.routesMicrophoneToMate()
+                && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingStartAfterPermission = true;
             pendingAudienceAfterPermission = initialAudience;
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_AUDIO);
@@ -604,13 +605,14 @@ public class MainActivity extends Activity {
                     @Override public void run() {
                         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE && "Listening".equals(value)) {
                             status("Listening", accent);
-                            if (!pendingTypedBrief.isEmpty() && runtime != null) {
-                                String pending = pendingTypedBrief;
-                                pendingTypedBrief = "";
-                                runtime.submitPrivateText(pending);
-                                applyAudience(SpeechAudience.MATE_HANDLING);
-                                status("Mate handling", green);
-                            }
+                        }
+                        if (("Listening".equals(value) || "Ready".equals(value))
+                                && !pendingTypedBrief.isEmpty() && runtime != null) {
+                            String pending = pendingTypedBrief;
+                            pendingTypedBrief = "";
+                            runtime.submitPrivateText(pending);
+                            applyAudience(SpeechAudience.MATE_HANDLING);
+                            status("Mate handling", green);
                         }
                     }
                 });
