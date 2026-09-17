@@ -197,17 +197,33 @@ public final class GeminiLiveModelSession implements ModelSession {
     public boolean isUserAudioEnabled() { return userAudioEnabled; }
     public boolean isPlaybackEnabled() { return playbackEnabled; }
 
-    /** Product-level audience boundary. Audio can keep recording locally while frames are discarded. */
-    public void setUserAudioEnabled(boolean enabled) {
+    /**
+     * Product-level audience boundary. Leaving PRIVATE_TO_MATE releases AudioRecord entirely,
+     * so Android no longer shows the microphone as active and no local audio is captured.
+     */
+    public synchronized void setUserAudioEnabled(boolean enabled) {
+        if (userAudioEnabled == enabled) {
+            if (enabled && running && setupReady && !recording) startInputAudio();
+            return;
+        }
         userAudioEnabled = enabled;
+        if (!enabled) {
+            stopInputAudio();
+            if (running && setupReady) status("Ready");
+        } else if (running && setupReady) {
+            startInputAudio();
+            status("Listening");
+        }
     }
 
     /** Prevent private Mate speech from leaking into a user-direct conversation. */
-    public void setPlaybackEnabled(boolean enabled) {
+    public synchronized void setPlaybackEnabled(boolean enabled) {
         playbackEnabled = enabled;
         if (!enabled) {
-            flushPlayback();
+            releasePlayer();
             setSpeaking(false);
+        } else if (running && setupReady) {
+            ensurePlayer();
         }
     }
 
@@ -274,8 +290,9 @@ public final class GeminiLiveModelSession implements ModelSession {
 
             if (response.has("setupComplete") || response.has("setup_complete")) {
                 setupReady = true;
+                if (playbackEnabled) ensurePlayer();
+                if (userAudioEnabled) startInputAudio();
                 status(userAudioEnabled ? "Listening" : "Ready");
-                startAudio();
                 return;
             }
 
@@ -342,6 +359,7 @@ public final class GeminiLiveModelSession implements ModelSession {
                         if (pcm.length > 0) {
                             emit(ModelEvent.audio(pcm));
                             if (playbackEnabled) {
+                                ensurePlayer();
                                 setSpeaking(true);
                                 audioWriter.execute(new Runnable() {
                                     @Override public void run() { writeAudio(pcm); }
@@ -360,8 +378,8 @@ public final class GeminiLiveModelSession implements ModelSession {
         }
     }
 
-    private synchronized void startAudio() {
-        if (!running || recording) return;
+    private synchronized void startInputAudio() {
+        if (!running || !setupReady || !userAudioEnabled || recording) return;
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             fail("Microphone permission is required.", null);
             return;
@@ -378,6 +396,16 @@ public final class GeminiLiveModelSession implements ModelSession {
                     INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, inputBuffer);
         }
 
+        recording = true;
+        recorder.startRecording();
+        micThread = new Thread(new Runnable() {
+            @Override public void run() { captureLoop(); }
+        }, "CrewMateMic");
+        micThread.start();
+    }
+
+    private synchronized void ensurePlayer() {
+        if (!running || !setupReady || !playbackEnabled || player != null) return;
         int minOutput = AudioTrack.getMinBufferSize(OUTPUT_RATE,
                 AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
         player = new AudioTrack.Builder()
@@ -394,19 +422,19 @@ public final class GeminiLiveModelSession implements ModelSession {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build();
         player.play();
-
-        recording = true;
-        recorder.startRecording();
-        micThread = new Thread(new Runnable() {
-            @Override public void run() { captureLoop(); }
-        }, "CrewMateMic");
-        micThread.start();
     }
 
     private void captureLoop() {
         byte[] buffer = new byte[3200];
-        while (running && recording && recorder != null) {
-            int read = recorder.read(buffer, 0, buffer.length);
+        while (running && recording && userAudioEnabled) {
+            AudioRecord target = recorder;
+            if (target == null) break;
+            int read;
+            try {
+                read = target.read(buffer, 0, buffer.length);
+            } catch (Exception ignored) {
+                break;
+            }
             if (read <= 0 || !userAudioEnabled) continue;
             byte[] frame = new byte[read];
             System.arraycopy(buffer, 0, frame, 0, read);
@@ -423,22 +451,33 @@ public final class GeminiLiveModelSession implements ModelSession {
         } catch (Exception ignored) {}
     }
 
-    private synchronized void stopAudio() {
+    private synchronized void stopInputAudio() {
         recording = false;
-        if (recorder != null) {
-            try { recorder.stop(); } catch (Exception ignored) {}
-            try { recorder.release(); } catch (Exception ignored) {}
-            recorder = null;
+        AudioRecord target = recorder;
+        recorder = null;
+        micThread = null;
+        if (target != null) {
+            try { target.stop(); } catch (Exception ignored) {}
+            try { target.release(); } catch (Exception ignored) {}
         }
-        if (player != null) {
-            try { player.pause(); player.flush(); player.stop(); } catch (Exception ignored) {}
-            try { player.release(); } catch (Exception ignored) {}
-            player = null;
+    }
+
+    private synchronized void releasePlayer() {
+        AudioTrack target = player;
+        player = null;
+        if (target != null) {
+            try { target.pause(); target.flush(); target.stop(); } catch (Exception ignored) {}
+            try { target.release(); } catch (Exception ignored) {}
         }
+    }
+
+    private synchronized void stopAudio() {
+        stopInputAudio();
+        releasePlayer();
         setSpeaking(false);
     }
 
-    private void flushPlayback() {
+    private synchronized void flushPlayback() {
         AudioTrack target = player;
         if (target == null) return;
         try { target.pause(); target.flush(); target.play(); } catch (Exception ignored) {}
