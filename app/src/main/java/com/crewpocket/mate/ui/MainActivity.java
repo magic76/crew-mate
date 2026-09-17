@@ -400,6 +400,9 @@ public class MainActivity extends Activity {
             return;
         }
         privateReturnAudience = speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                || (isInPersonMode() && viewedSession != null
+                && viewedSession.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                && !viewedSession.targetPerson().isEmpty())
                 ? SpeechAudience.EXTERNAL_WITH_MATE
                 : SpeechAudience.MATE_HANDLING;
         applyAudience(SpeechAudience.PRIVATE_TO_MATE);
@@ -591,6 +594,10 @@ public class MainActivity extends Activity {
                         viewedSession = session;
                         if (session.userDirectControl() && speechAudience != SpeechAudience.USER_DIRECT) {
                             applyAudience(SpeechAudience.USER_DIRECT);
+                        } else if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                                && speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+                            privateReturnAudience = SpeechAudience.EXTERNAL_WITH_MATE;
+                            applyAudience(SpeechAudience.MATE_HANDLING);
                         }
                         renderSession(session);
                     }
