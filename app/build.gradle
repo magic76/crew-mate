@@ -2,6 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
+def releasePropertiesFile = rootProject.file('keystore.properties')
+def releaseProperties = new Properties()
+if (releasePropertiesFile.exists()) {
+    releasePropertiesFile.withInputStream { releaseProperties.load(it) }
+}
+
 android {
     namespace 'com.crewpocket.mate'
     compileSdk 36
@@ -16,10 +22,24 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            if (releasePropertiesFile.exists()) {
+                storeFile file(releaseProperties['storeFile'])
+                storePassword releaseProperties['storePassword']
+                keyAlias releaseProperties['keyAlias']
+                keyPassword releaseProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (releasePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

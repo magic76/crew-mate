@@ -1,0 +1,62 @@
+name: Build Play AAB
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Crew Mate
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK components
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+      - name: Build signed release bundle
+        env:
+          CREW_MATE_KEYSTORE_B64: ${{ secrets.CREW_MATE_KEYSTORE_B64 }}
+          CREW_MATE_KEYSTORE_PASSWORD: ${{ secrets.CREW_MATE_KEYSTORE_PASSWORD }}
+          CREW_MATE_KEY_ALIAS: ${{ secrets.CREW_MATE_KEY_ALIAS }}
+          CREW_MATE_KEY_PASSWORD: ${{ secrets.CREW_MATE_KEY_PASSWORD }}
+        run: |
+          test -n "$CREW_MATE_KEYSTORE_B64"
+          test -n "$CREW_MATE_KEYSTORE_PASSWORD"
+          test -n "$CREW_MATE_KEY_ALIAS"
+          test -n "$CREW_MATE_KEY_PASSWORD"
+
+          echo "$CREW_MATE_KEYSTORE_B64" | base64 --decode > app/release.keystore
+          cat > keystore.properties <<EOF
+          storeFile=release.keystore
+          storePassword=$CREW_MATE_KEYSTORE_PASSWORD
+          keyAlias=$CREW_MATE_KEY_ALIAS
+          keyPassword=$CREW_MATE_KEY_PASSWORD
+          EOF
+
+          gradle :app:testDebugUnitTest :app:bundleRelease --no-daemon --stacktrace
+
+      - name: Upload Play AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrewMate-${{ github.ref_name }}-release
+          path: app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
