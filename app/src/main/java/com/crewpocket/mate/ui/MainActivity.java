@@ -9,7 +9,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -30,9 +29,7 @@ import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.config.AppConfig;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
-import com.crewpocket.mate.model.PendingApproval;
 import com.crewpocket.mate.model.SpeechAudience;
-import com.crewpocket.mate.service.CommunicationContinuationService;
 import com.crewpocket.mate.storage.SessionStore;
 import com.crewpocket.mate.voice.GeminiLiveModelSession;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
@@ -42,7 +39,6 @@ import java.util.List;
 /** Task-first UI with an explicit speech audience boundary. */
 public class MainActivity extends Activity {
     private static final int REQUEST_AUDIO = 701;
-    private static final int REQUEST_NOTIFICATIONS = 702;
     private static final long INPUT_TRANSCRIPT_SETTLE_MS = 900L;
 
     private final int bg = Color.rgb(9, 15, 31);
@@ -87,13 +83,8 @@ public class MainActivity extends Activity {
     private LinearLayout privateTimeline;
     private ScrollView externalScroll;
     private ScrollView privateScroll;
-    private LinearLayout approvalCard;
-    private TextView approvalLabel;
-    private TextView approvalDraft;
-
     private CrewMateRuntime runtime;
     private GeminiLiveModelSession modelSession;
-    private MessagingBackend messagingBackend;
     private SessionStore sessionStore;
     private CommunicationSession viewedSession;
     private SpeechAudience speechAudience = SpeechAudience.IDLE;
@@ -102,8 +93,6 @@ public class MainActivity extends Activity {
     private SpeechAudience pendingAudienceAfterPermission = SpeechAudience.PRIVATE_TO_MATE;
     private boolean pendingStartAfterPermission;
     private boolean pendingHandoffAfterPermission;
-    private boolean resumeAfterTakeoverOnStart;
-    private String editedApprovalText = "";
     private String pendingTypedBrief = "";
 
     @Override
@@ -112,9 +101,6 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         sessionStore = new SessionStore(this);
-        // Crew Mate's product flow is physical handoff through Gemini Live.
-        // Migrate any old dev/test provider preference so it cannot leak into a new task.
-        AppConfig.setMessagingProvider(this, AppConfig.PROVIDER_IN_PERSON);
         setContentView(buildUi());
         restoreRequestedOrLatest(getIntent());
     }
@@ -127,53 +113,17 @@ public class MainActivity extends Activity {
     }
 
     private void restoreRequestedOrLatest(Intent intent) {
-        CommunicationSession restored = null;
-        boolean explicitlyRequested = false;
-        if (intent != null) {
-            String requested = intent.getStringExtra(CommunicationContinuationService.EXTRA_SESSION_ID);
-            if (requested != null && !requested.trim().isEmpty()) {
-                explicitlyRequested = true;
-                restored = sessionStore.loadById(requested.trim());
-            }
-        }
-        if (restored == null && !explicitlyRequested) {
-            CommunicationSession latest = sessionStore.loadLatest();
-            // Old Fake/Telegram sessions remain available in history, but must never become
-            // the active physical handoff flow on app launch.
-            if (latest != null && !looksLikeRemoteMessagingSession(latest)) restored = latest;
-        }
-        viewedSession = restored;
-        speechAudience = passiveAudience(restored);
+        viewedSession = sessionStore.loadLatest();
+        speechAudience = passiveAudience(viewedSession);
         renderSession(viewedSession);
         if (viewedSession == null) {
             status("Ready", muted);
         } else if (viewedSession.userDirectControl()) {
             status("User direct", direct);
-        } else if (viewedSession.status() == CommunicationSession.Status.REPLY_RECEIVED) {
-            status("Reply received", green);
         } else {
             String value = CrewMateRuntime.displayStatus(viewedSession.status());
             status(value, statusColor(value));
         }
-    }
-
-    private boolean looksLikeRemoteMessagingSession(CommunicationSession session) {
-        if (session == null) return false;
-        for (Message message : session.messages()) {
-            if (message.sender == Message.Sender.MATE) {
-                Message.Status status = message.status();
-                if (status == Message.Status.DRAFT
-                        || status == Message.Status.PENDING_APPROVAL
-                        || status == Message.Status.SENDING
-                        || status == Message.Status.SENT
-                        || status == Message.Status.DELIVERED
-                        || status == Message.Status.FAILED
-                        || status == Message.Status.CANCELLED) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private SpeechAudience passiveAudience(CommunicationSession session) {
@@ -296,10 +246,6 @@ public class MainActivity extends Activity {
         externalLp.setMargins(0, dp(6), 0, dp(10));
         root.addView(externalScroll, externalLp);
 
-        approvalCard = buildApprovalCard();
-        approvalCard.setVisibility(View.GONE);
-        root.addView(approvalCard);
-
         privateSectionTitle = sectionTitle("🔒 私人 · 你 ↔ Mate");
         root.addView(privateSectionTitle);
         privateTimeline = new LinearLayout(this);
@@ -350,79 +296,6 @@ public class MainActivity extends Activity {
         return root;
     }
 
-    private LinearLayout buildApprovalCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(14), dp(12), dp(14), dp(12));
-        GradientDrawable background = roundRect(Color.rgb(61, 43, 18), 14);
-        background.setStroke(dp(1), Color.rgb(180, 83, 9));
-        card.setBackground(background);
-        LinearLayout.LayoutParams lp = cardLp(dp(10));
-        card.setLayoutParams(lp);
-
-        approvalLabel = new TextView(this);
-        approvalLabel.setTextColor(amber);
-        approvalLabel.setTextSize(12);
-        approvalLabel.setTypeface(Typeface.DEFAULT_BOLD);
-        card.addView(approvalLabel);
-        approvalDraft = new TextView(this);
-        approvalDraft.setTextColor(text);
-        approvalDraft.setTextSize(14);
-        approvalDraft.setLineSpacing(0, 1.15f);
-        approvalDraft.setPadding(0, dp(8), 0, dp(10));
-        card.addView(approvalDraft);
-
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        Button edit = actionButton("修改", surface2);
-        edit.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { editApproval(); }
-        });
-        actions.addView(edit, new LinearLayout.LayoutParams(0, dp(42), 1f));
-        Button approve = actionButton("允許送出", Color.rgb(5, 150, 105));
-        approve.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (runtime != null && runtime.approvePending(editedApprovalText)) {
-                    applyAudience(SpeechAudience.MATE_HANDLING);
-                    status("Sending", green);
-                }
-            }
-        });
-        LinearLayout.LayoutParams approveLp = new LinearLayout.LayoutParams(0, dp(42), 1.25f);
-        approveLp.setMargins(dp(8), 0, 0, 0);
-        actions.addView(approve, approveLp);
-        Button cancel = actionButton("取消", Color.rgb(127, 29, 29));
-        cancel.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (runtime != null && runtime.cancelPending()) status("Needs your input", amber);
-            }
-        });
-        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(0, dp(42), 0.8f);
-        cancelLp.setMargins(dp(8), 0, 0, 0);
-        actions.addView(cancel, cancelLp);
-        card.addView(actions);
-        return card;
-    }
-
-    private void editApproval() {
-        if (runtime == null || runtime.session().pendingApproval() == null) return;
-        final EditText input = new EditText(this);
-        input.setText(editedApprovalText);
-        input.setSelection(input.getText().length());
-        input.setTextColor(Color.BLACK);
-        new AlertDialog.Builder(this)
-                .setTitle("送出前修改")
-                .setView(input)
-                .setPositiveButton("儲存", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        editedApprovalText = input.getText().toString().trim();
-                        approvalDraft.setText(editedApprovalText);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
     private void handlePrimaryAction() {
         if (speechAudience == SpeechAudience.USER_DIRECT) {
             handBackToMate();
@@ -455,9 +328,7 @@ public class MainActivity extends Activity {
             enterPrivateSupplement();
             return;
         }
-        if (viewedSession != null
-                && (viewedSession.status() == CommunicationSession.Status.REPLY_RECEIVED
-                || viewedSession.status() == CommunicationSession.Status.STOPPED)) {
+        if (viewedSession != null && viewedSession.status() == CommunicationSession.Status.STOPPED) {
             ensureRuntime(SpeechAudience.MATE_HANDLING);
             return;
         }
@@ -537,12 +408,8 @@ public class MainActivity extends Activity {
         flushInputTurn();
         handler.removeCallbacks(flushInputTurnRunnable);
         inputTurn.clear();
-        if (runtime != null) {
-            runtime.cancelPending();
-        }
         viewedSession.setUserDirectControl(true);
         sessionStore.save(viewedSession);
-        stopService(new Intent(this, CommunicationContinuationService.class));
         applyAudience(SpeechAudience.USER_DIRECT);
         if (runtime != null) runtime.interrupt();
         status("User direct", direct);
@@ -553,23 +420,12 @@ public class MainActivity extends Activity {
         if (viewedSession == null) return;
         viewedSession.setUserDirectControl(false);
         sessionStore.save(viewedSession);
-        if (isInPersonMode()) {
-            if (runtime != null) {
-                runtime.releaseUserDirectControl();
-                applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
-                status("External live", green);
-            } else {
-                ensureRuntime(SpeechAudience.EXTERNAL_WITH_MATE);
-            }
-            return;
-        }
-        applyAudience(SpeechAudience.MATE_HANDLING);
         if (runtime != null) {
-            runtime.resumeAfterUserTakeover();
-            status("Mate handling", green);
+            runtime.releaseUserDirectControl();
+            applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+            status("External live", green);
         } else {
-            resumeAfterTakeoverOnStart = true;
-            ensureRuntime(SpeechAudience.MATE_HANDLING);
+            ensureRuntime(SpeechAudience.EXTERNAL_WITH_MATE);
         }
     }
 
@@ -605,10 +461,6 @@ public class MainActivity extends Activity {
         startRuntime(key, initialAudience);
     }
 
-    private MessagingBackend createMessagingBackend() {
-        return new InPersonMessagingBackend();
-    }
-
     private boolean isInPersonMode() {
         return true;
     }
@@ -619,10 +471,6 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(flushInputTurnRunnable);
         final CommunicationSession liveSession;
         final boolean resumeExisting = shouldResume(viewedSession);
-        final CommunicationSession.Status resumeStatus = resumeExisting ? viewedSession.status() : null;
-        final boolean resumeAfterReply = resumeExisting
-                && (resumeStatus == CommunicationSession.Status.REPLY_RECEIVED
-                || resumeStatus == CommunicationSession.Status.STOPPED);
         if (resumeExisting) {
             liveSession = viewedSession;
         } else {
@@ -631,8 +479,6 @@ public class MainActivity extends Activity {
             sessionStore.save(liveSession);
         }
 
-        stopService(new Intent(this, CommunicationContinuationService.class));
-        messagingBackend = createMessagingBackend();
         speechAudience = initialAudience == null ? SpeechAudience.MATE_HANDLING : initialAudience;
 
         modelSession = new GeminiLiveModelSession(this, key, AppConfig.getVoice(this), new GeminiLiveModelSession.UiListener() {
@@ -691,10 +537,9 @@ public class MainActivity extends Activity {
                 });
             }
         });
-        modelSession.setChannelMode(messagingBackend.channelMode().name());
         modelSession.setSpeechAudience(speechAudience);
 
-        runtime = new CrewMateRuntime(liveSession, modelSession, messagingBackend, new CrewMateRuntime.Listener() {
+        runtime = new CrewMateRuntime(liveSession, modelSession, new InPersonMessagingBackend(), new CrewMateRuntime.Listener() {
             @Override public void onSessionChanged(final CommunicationSession session) {
                 sessionStore.save(session);
                 runOnUiThread(new Runnable() {
@@ -707,16 +552,6 @@ public class MainActivity extends Activity {
                             privateReturnAudience = SpeechAudience.EXTERNAL_WITH_MATE;
                             applyAudience(SpeechAudience.MATE_HANDLING);
                         }
-                        renderSession(session);
-                    }
-                });
-            }
-
-            @Override public void onApprovalRequired(final CommunicationSession session, final PendingApproval approval) {
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        editedApprovalText = approval.content();
-                        applyAudience(SpeechAudience.MATE_HANDLING);
                         renderSession(session);
                     }
                 });
@@ -739,35 +574,6 @@ public class MainActivity extends Activity {
         runtime.start();
         applyAudience(speechAudience);
 
-        boolean takeoverResume = resumeAfterTakeoverOnStart;
-        resumeAfterTakeoverOnStart = false;
-        if (takeoverResume) {
-            runtime.resumePersistedTask();
-        } else if (resumeAfterReply && initialAudience == SpeechAudience.MATE_HANDLING) {
-            runtime.resumePersistedTask();
-        }
-    }
-
-    private void watchReplyWhileRuntimeIsActive(final CommunicationSession session) {
-        final MessagingBackend backend = messagingBackend;
-        final CrewMateRuntime activeRuntime = runtime;
-        if (backend == null || activeRuntime == null || session == null || session.targetPersonId().isEmpty()) return;
-        MessagingBackend.Contact contact = new MessagingBackend.Contact(session.targetPersonId(), session.targetPerson());
-        backend.watchIncoming(contact, session.latestMessageTimestamp(), new MessagingBackend.IncomingCallback() {
-            @Override public void onMessage(MessagingBackend.RemoteMessage reply) {
-                CrewMateRuntime current = runtime;
-                if (current != null && current == activeRuntime) current.acceptExternalReply(reply);
-            }
-
-            @Override public void onError(final String message) {
-                if (runtime != activeRuntime) return;
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        status(message == null || message.trim().isEmpty() ? "Waiting for reply" : message, red);
-                    }
-                });
-            }
-        });
     }
 
     private boolean shouldResume(CommunicationSession session) {
@@ -795,23 +601,15 @@ public class MainActivity extends Activity {
         if (speechAudience.routesMicrophoneToMate()) flushInputTurn();
         CrewMateRuntime target = runtime;
         CommunicationSession session = target == null ? viewedSession : target.session();
-        boolean shouldHandoff = shouldHandoffToBackground(session);
         if (session != null) sessionStore.save(session);
         if (target != null) target.close();
         runtime = null;
-        if (messagingBackend != null) messagingBackend.shutdown();
-        messagingBackend = null;
         modelSession = null;
         if (session != null) {
             viewedSession = session;
             sessionStore.save(session);
         }
-        if (shouldHandoff && session != null) {
-            CommunicationContinuationService.start(this, session.sessionId);
-            requestNotificationPermissionIfUseful();
-            status("Waiting for reply", green);
-            speechAudience = SpeechAudience.MATE_HANDLING;
-        } else if (session != null && session.userDirectControl()) {
+        if (session != null && session.userDirectControl()) {
             speechAudience = SpeechAudience.USER_DIRECT;
             status("User direct", direct);
         } else {
@@ -821,30 +619,17 @@ public class MainActivity extends Activity {
         renderSession(viewedSession);
     }
 
-    private boolean shouldHandoffToBackground(CommunicationSession session) {
-        return false;
-    }
-
-    private void requestNotificationPermissionIfUseful() {
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_NOTIFICATIONS);
-        }
-    }
-
     private void startFreshTask() {
         if (runtime != null) stopRuntime();
-        AppConfig.setMessagingProvider(this, AppConfig.PROVIDER_IN_PERSON);
         viewedSession = null;
         speechAudience = SpeechAudience.IDLE;
-        editedApprovalText = "";
         renderSession(null);
         status("Ready", muted);
     }
 
     private void showHistory() {
         if (runtime != null) {
-            Toast.makeText(this, "請先讓 Mate 停在背景再查看紀錄。", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "請先結束目前的即時對話再查看紀錄。", Toast.LENGTH_SHORT).show();
             return;
         }
         final List<CommunicationSession> sessions = sessionStore.loadAll();
@@ -897,7 +682,6 @@ public class MainActivity extends Activity {
                 .setPositiveButton("儲存", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         AppConfig.setApiKey(MainActivity.this, api.getText().toString());
-                        AppConfig.setMessagingProvider(MainActivity.this, AppConfig.PROVIDER_IN_PERSON);
                         renderSession(viewedSession);
                     }
                 })
@@ -966,7 +750,6 @@ public class MainActivity extends Activity {
             taskText.setTextSize(20);
             taskInputButton.setText("送出文字");
             taskVoiceButton.setText("🎙  說給 Mate 聽");
-            approvalCard.setVisibility(View.GONE);
             audienceCard.setVisibility(View.GONE);
             modeActions.setVisibility(View.GONE);
             utilities.setVisibility(View.GONE);
@@ -1016,23 +799,6 @@ public class MainActivity extends Activity {
         privateSectionTitle.setText("🔒 私人 · 你 ↔ Mate");
         renderTimelines(session, person);
 
-        PendingApproval approval = session.pendingApproval();
-        if (runtime != null && !session.userDirectControl()
-                && approval != null && approval.state() == PendingApproval.State.WAITING) {
-            if (editedApprovalText.isEmpty()) editedApprovalText = approval.content();
-            approvalDraft.setText(editedApprovalText);
-            if (approval.reason.contains("ASK_FIRST_MESSAGE")) {
-                approvalLabel.setText("確認第一則訊息 · 通過後 Mate 會在此目標內自行往返");
-            } else if (approval.reason.contains("HIGH_RISK")) {
-                approvalLabel.setText("這一步可能產生承諾或風險，需要你確認");
-            } else {
-                approvalLabel.setText("Mate 準備送出這則訊息");
-            }
-            approvalCard.setVisibility(View.VISIBLE);
-        } else {
-            editedApprovalText = "";
-            approvalCard.setVisibility(View.GONE);
-        }
         renderAudience(session);
         renderControls(session);
     }
@@ -1191,8 +957,6 @@ public class MainActivity extends Activity {
             if (external) {
                 boolean mate = message.sender == Message.Sender.MATE;
                 String label = mate ? "Mate → " + person : person + " → Mate";
-                String state = externalStatus(message.status());
-                if (!state.isEmpty()) label += " · " + state;
                 addBubble(externalTimeline, label, message.content(), mate, false);
                 externalCount++;
             } else if (message.sender == Message.Sender.USER || message.sender == Message.Sender.MATE) {
@@ -1250,20 +1014,6 @@ public class MainActivity extends Activity {
         container.addView(placeholder);
     }
 
-    private String externalStatus(Message.Status status) {
-        if (status == null) return "";
-        switch (status) {
-            case DRAFT: return "草稿";
-            case PENDING_APPROVAL: return "未送出";
-            case SENDING: return "傳送中";
-            case SENT:
-            case DELIVERED: return "已送出";
-            case FAILED: return "失敗";
-            case CANCELLED: return "已取消";
-            default: return "";
-        }
-    }
-
     private boolean isNearBottom(ScrollView scroll) {
         if (scroll == null || scroll.getChildCount() == 0) return true;
         View child = scroll.getChildAt(0);
@@ -1279,9 +1029,8 @@ public class MainActivity extends Activity {
 
     private int statusColor(String value) {
         if (value == null) return muted;
-        if (value.contains("approval") || value.contains("input") || value.contains("Connecting")) return amber;
-        if (value.contains("Sending") || value.contains("Listening") || value.contains("reply")
-                || value.contains("Reply") || value.contains("Completed") || value.contains("Waiting for reply")
+        if (value.contains("input") || value.contains("Connecting")) return amber;
+        if (value.contains("Listening") || value.contains("Completed")
                 || value.contains("Mate handling") || value.contains("External live")) return green;
         if (value.contains("User direct")) return direct;
         if (value.contains("Error") || value.contains("failed")) return red;
@@ -1290,11 +1039,7 @@ public class MainActivity extends Activity {
 
     private String friendlyStatus(String value) {
         if (value == null) return "";
-        if (value.contains("Waiting for approval")) return "等你確認";
         if (value.contains("Needs your input")) return "需要你決定";
-        if (value.contains("Waiting for reply")) return "等待對方回覆";
-        if (value.contains("Reply received")) return "對方已回覆";
-        if (value.contains("Sending")) return "正在傳送";
         if (value.contains("Listening")) return "🔒 正在聽你對 Mate 說";
         if (value.contains("Mate is speaking")) return "Mate 正在回覆你";
         if (value.contains("Mate handling")) return "Mate 正在處理";
