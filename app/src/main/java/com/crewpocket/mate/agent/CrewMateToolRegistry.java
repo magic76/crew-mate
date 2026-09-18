@@ -31,27 +31,31 @@ public final class CrewMateToolRegistry {
     public ToolRegistry registry() { return registry; }
 
     private void registerTools() {
-        registry.register("find_contact", new ToolExecutor() {
+        registry.register("update_task_consensus", new ToolExecutor() {
             @Override public void execute(ToolCall call, Completion completion) {
-                String query = arg(call, "query");
+                String target = arg(call, "target");
                 String goal = arg(call, "goal");
-                if (query.isEmpty()) {
-                    completion.complete(ToolResult.failure(call.id(), "PERSON_REQUIRED", "Person is empty"));
-                    return;
-                }
+                String constraints = arg(call, "constraints");
+                String escalationBoundary = arg(call, "escalation_boundary");
+                boolean ready = boolArg(call, "ready");
 
-                String personId = "local-" + query.toLowerCase(Locale.US).replace(' ', '-');
-                session.setTarget(personId, query);
-                session.setGoal(goal);
+                String personId = target.isEmpty()
+                        ? ""
+                        : "local-" + target.toLowerCase(Locale.US).replace(' ', '-');
+                session.setConsensus(personId, target, goal, constraints, escalationBoundary, ready);
                 session.setOutcomeSummary("");
                 session.setUserDirectControl(false);
+                if (ready) session.setPendingUserQuestion("");
                 session.setStatus(CommunicationSession.Status.THINKING);
                 notifyChanged();
 
                 Map<String, Object> payload = new LinkedHashMap<String, Object>();
                 payload.put("person_id", personId);
-                payload.put("display_name", query);
+                payload.put("display_name", target);
                 payload.put("goal", session.goal());
+                payload.put("constraints", session.constraints());
+                payload.put("escalation_boundary", session.escalationBoundary());
+                payload.put("ready", session.consensusReady());
                 completion.complete(ToolResult.success(call.id(), payload));
             }
         });
@@ -65,6 +69,7 @@ public final class CrewMateToolRegistry {
                     return;
                 }
                 session.setPendingUserQuestion(question);
+                session.setConsensusReady(false);
                 session.setStatus(CommunicationSession.Status.NEEDS_USER_INPUT);
                 notifyChanged();
                 if (listener != null) listener.onUserInputRequested(session, question, reason);
@@ -101,5 +106,12 @@ public final class CrewMateToolRegistry {
         if (call == null || key == null) return "";
         Object value = call.arguments().get(key);
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static boolean boolArg(ToolCall call, String key) {
+        if (call == null || key == null) return false;
+        Object value = call.arguments().get(key);
+        if (value instanceof Boolean) return (Boolean) value;
+        return value != null && Boolean.parseBoolean(String.valueOf(value));
     }
 }

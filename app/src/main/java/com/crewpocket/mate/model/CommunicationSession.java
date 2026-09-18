@@ -19,6 +19,9 @@ public final class CommunicationSession {
     private String targetPerson = "";
     private String targetPersonId = "";
     private String goal = "";
+    private String constraints = "";
+    private String escalationBoundary = "";
+    private boolean consensusReady;
     private String outcomeSummary = "";
     private String userLanguage = "AUTO";
     private String otherPersonLanguage = "AUTO";
@@ -37,6 +40,9 @@ public final class CommunicationSession {
     public synchronized String targetPerson() { return targetPerson; }
     public synchronized String targetPersonId() { return targetPersonId; }
     public synchronized String goal() { return goal; }
+    public synchronized String constraints() { return constraints; }
+    public synchronized String escalationBoundary() { return escalationBoundary; }
+    public synchronized boolean consensusReady() { return consensusReady; }
     public synchronized String outcomeSummary() { return outcomeSummary; }
     public synchronized String userLanguage() { return userLanguage; }
     public synchronized String otherPersonLanguage() { return otherPersonLanguage; }
@@ -52,6 +58,16 @@ public final class CommunicationSession {
     }
 
     public synchronized void setGoal(String value) { goal = clean(value); touch(); }
+    public synchronized void setConsensus(String targetId, String targetDisplayName, String goalValue,
+                                          String constraintsValue, String escalationValue, boolean ready) {
+        targetPersonId = clean(targetId);
+        targetPerson = clean(targetDisplayName);
+        goal = clean(goalValue);
+        constraints = clean(constraintsValue);
+        escalationBoundary = clean(escalationValue);
+        consensusReady = ready && !targetPerson.isEmpty() && !goal.isEmpty();
+        touch();
+    }
     public synchronized void setOutcomeSummary(String value) { outcomeSummary = clean(value); touch(); }
     public synchronized void setLanguages(String userValue, String otherValue) {
         userLanguage = language(userValue);
@@ -65,6 +81,10 @@ public final class CommunicationSession {
     }
 
     public synchronized void setPendingUserQuestion(String value) { pendingUserQuestion = clean(value); touch(); }
+    public synchronized void setConsensusReady(boolean value) {
+        consensusReady = value && !targetPerson.isEmpty() && !goal.isEmpty();
+        touch();
+    }
     public synchronized void setUpdatedAtForRestore(long value) { if (value > 0) updatedAt = value; }
 
     public synchronized void addMessage(Message message) {

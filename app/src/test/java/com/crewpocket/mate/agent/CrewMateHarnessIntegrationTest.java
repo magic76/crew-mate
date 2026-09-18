@@ -33,7 +33,7 @@ public class CrewMateHarnessIntegrationTest {
         List<String> names = new ArrayList<String>();
         for (ToolSpec tool : spec.tools()) names.add(tool.name());
         assertEquals(3, names.size());
-        assertTrue(names.contains("find_contact"));
+        assertTrue(names.contains("update_task_consensus"));
         assertTrue(names.contains("request_user_input"));
         assertTrue(names.contains("complete_task"));
         assertFalse(names.contains("draft_message"));
@@ -77,16 +77,52 @@ public class CrewMateHarnessIntegrationTest {
     }
 
     @Test
-    public void findContactStoresVisiblePersonAndGoal() {
+    public void taskConsensusStoresSharedGoalConstraintsAndBoundary() {
         CommunicationSession session = new CommunicationSession();
         CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
 
-        ToolResult result = execute(tools.registry(), call("find", "find_contact",
-                map("query", "Reception", "goal", "Ask where to put the laundry bag")));
+        Map<String, Object> args = new LinkedHashMap<String, Object>();
+        args.put("target", "Reception");
+        args.put("goal", "Ask for late checkout until 2 PM");
+        args.put("constraints", "Prefer free; up to 500 THB is acceptable");
+        args.put("escalation_boundary", "Ask me before agreeing above 500 THB");
+        args.put("ready", true);
+
+        ToolResult result = execute(tools.registry(),
+                call("consensus", "update_task_consensus", args));
 
         assertTrue(result.success());
         assertEquals("Reception", session.targetPerson());
-        assertEquals("Ask where to put the laundry bag", session.goal());
+        assertEquals("Ask for late checkout until 2 PM", session.goal());
+        assertEquals("Prefer free; up to 500 THB is acceptable", session.constraints());
+        assertEquals("Ask me before agreeing above 500 THB", session.escalationBoundary());
+        assertTrue(session.consensusReady());
+    }
+
+    @Test
+    public void incompleteConsensusCannotBecomeReadyWithoutTargetAndGoal() {
+        CommunicationSession session = new CommunicationSession();
+        session.setConsensus("", "", "", "No extra charge", "Ask me if payment is required", true);
+
+        assertFalse(session.consensusReady());
+    }
+
+    @Test
+    public void partialConsensusCanBeShownBeforeClarificationCompletes() {
+        CommunicationSession session = new CommunicationSession();
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
+
+        Map<String, Object> args = new LinkedHashMap<String, Object>();
+        args.put("goal", "Ask whether late checkout is possible");
+        args.put("ready", false);
+
+        ToolResult result = execute(tools.registry(),
+                call("partial", "update_task_consensus", args));
+
+        assertTrue(result.success());
+        assertEquals("", session.targetPerson());
+        assertEquals("Ask whether late checkout is possible", session.goal());
+        assertFalse(session.consensusReady());
     }
 
     @Test
@@ -106,8 +142,13 @@ public class CrewMateHarnessIntegrationTest {
     public void completeTaskStoresOutcomeAndCompletedState() {
         CommunicationSession session = new CommunicationSession();
         CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
-        execute(tools.registry(), call("find", "find_contact",
-                map("query", "Reception", "goal", "Ask where to put the laundry bag")));
+        Map<String, Object> consensus = new LinkedHashMap<String, Object>();
+        consensus.put("target", "Reception");
+        consensus.put("goal", "Ask where to put the laundry bag");
+        consensus.put("constraints", "");
+        consensus.put("escalation_boundary", "");
+        consensus.put("ready", true);
+        execute(tools.registry(), call("consensus", "update_task_consensus", consensus));
 
         ToolResult result = execute(tools.registry(), call("done", "complete_task",
                 map("summary", "Reception confirmed the laundry bag should be left by the door.")));

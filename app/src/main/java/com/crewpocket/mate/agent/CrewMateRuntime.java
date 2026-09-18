@@ -72,6 +72,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
+        session.setConsensusReady(false);
         if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
             session.setPendingUserQuestion("");
             session.setStatus(CommunicationSession.Status.THINKING);
@@ -91,6 +92,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
+        session.setConsensusReady(false);
         if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
             session.setPendingUserQuestion("");
             session.setStatus(CommunicationSession.Status.THINKING);
