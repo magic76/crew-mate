@@ -24,7 +24,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.crewpocket.mate.agent.CrewMateRuntime;
-import com.crewpocket.mate.channel.InPersonMessagingBackend;
 import com.crewpocket.mate.config.AppConfig;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
@@ -538,7 +537,7 @@ public class MainActivity extends Activity {
         });
         modelSession.setSpeechAudience(speechAudience);
 
-        runtime = new CrewMateRuntime(liveSession, modelSession, new InPersonMessagingBackend(), new CrewMateRuntime.Listener() {
+        runtime = new CrewMateRuntime(liveSession, modelSession, new CrewMateRuntime.Listener() {
             @Override public void onSessionChanged(final CommunicationSession session) {
                 sessionStore.save(session);
                 runOnUiThread(new Runnable() {
