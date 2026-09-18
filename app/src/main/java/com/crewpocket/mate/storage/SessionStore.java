@@ -86,6 +86,9 @@ public final class SessionStore {
         root.put("target_person", session.targetPerson());
         root.put("target_person_id", session.targetPersonId());
         root.put("goal", session.goal());
+        root.put("constraints", session.constraints());
+        root.put("escalation_boundary", session.escalationBoundary());
+        root.put("consensus_ready", session.consensusReady());
         root.put("outcome_summary", session.outcomeSummary());
         root.put("user_language", session.userLanguage());
         root.put("other_person_language", session.otherPersonLanguage());
@@ -113,7 +116,13 @@ public final class SessionStore {
         try {
             CommunicationSession session = new CommunicationSession(root.optString("session_id"));
             session.setTarget(root.optString("target_person_id"), root.optString("target_person"));
-            session.setGoal(root.optString("goal"));
+            session.setConsensus(
+                    root.optString("target_person_id"),
+                    root.optString("target_person"),
+                    root.optString("goal"),
+                    root.optString("constraints"),
+                    root.optString("escalation_boundary"),
+                    root.optBoolean("consensus_ready", false));
             session.setOutcomeSummary(root.optString("outcome_summary"));
             session.setLanguages(
                     root.optString("user_language", "AUTO"),
