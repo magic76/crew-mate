@@ -348,3 +348,19 @@ The main screen accounts for:
 The bottom action row also gets extra visual safety spacing so stage-two controls remain above both gesture navigation and three-button navigation.
 
 History list/detail dialogs use self-contained rounded sheets with adaptive scroll heights and their own action rows instead of the platform AlertDialog footer. This avoids the large dark/gray footer block and keeps dialogs inside system bars.
+
+
+## Bottom action dock
+
+The primary task controls are treated as a bottom dock rather than ordinary flowing content.
+
+- when the stage-two transcript is visible, its weighted scroll area consumes remaining height and keeps the action dock at the bottom
+- when there is no weighted transcript area, a flexible spacer pushes the action dock to the bottom
+- the dock disables child/padding clipping and adds internal vertical padding so rounded button bottoms/shadows are not cut off
+- Android navigation/gesture safe-area padding remains outside the dock
+
+## Removing task history
+
+Saved task records can be removed from both the history card list and task detail view.
+
+Removal always requires confirmation. If the removed record is the currently active task, Crew Mate first stops the Live session, deletes the session, and returns to a fresh task screen. Removing another record does not disturb the current task.
