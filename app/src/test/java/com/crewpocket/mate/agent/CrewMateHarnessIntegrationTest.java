@@ -100,6 +100,15 @@ public class CrewMateHarnessIntegrationTest {
     }
 
     @Test
+    public void agentPromptDoesNotRequirePaymentForUnrelatedTasks() {
+        String prompt = new CrewMateAgentSpec().systemPrompt();
+
+        assertTrue(prompt.contains("Payment fields are OPTIONAL"));
+        assertTrue(prompt.contains("leave both empty"));
+        assertTrue(prompt.contains("do not ask payment questions"));
+    }
+
+    @Test
     public void taskConsensusStoresPaymentPreferenceAndFallbackPolicy() {
         CommunicationSession session = new CommunicationSession();
         CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
