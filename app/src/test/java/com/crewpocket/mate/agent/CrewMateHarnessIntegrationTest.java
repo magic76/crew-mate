@@ -1,9 +1,7 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.FakeMessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
-import com.crewpocket.mate.model.PendingApproval;
 import com.magic76.crew.agent.AgentEvent;
 import com.magic76.crew.agent.AgentHarness;
 import com.magic76.crew.agent.ModelEvent;
@@ -22,8 +20,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -32,17 +28,17 @@ import static org.junit.Assert.*;
 public class CrewMateHarnessIntegrationTest {
 
     @Test
-    public void agentSpecExposesExpectedTools() {
+    public void agentSpecExposesOnlyInPersonTools() {
         CrewMateAgentSpec spec = new CrewMateAgentSpec();
         List<String> names = new ArrayList<String>();
         for (ToolSpec tool : spec.tools()) names.add(tool.name());
-        assertEquals(6, names.size());
+        assertEquals(3, names.size());
         assertTrue(names.contains("find_contact"));
-        assertTrue(names.contains("get_conversation"));
-        assertTrue(names.contains("draft_message"));
-        assertTrue(names.contains("send_message"));
         assertTrue(names.contains("request_user_input"));
         assertTrue(names.contains("complete_task"));
+        assertFalse(names.contains("draft_message"));
+        assertFalse(names.contains("send_message"));
+        assertFalse(names.contains("get_conversation"));
     }
 
     @Test
@@ -50,10 +46,9 @@ public class CrewMateHarnessIntegrationTest {
         RecordingModelSession model = new RecordingModelSession();
         AgentHarness harness = new AgentHarness(new CrewMateAgentSpec(), model, new ToolRegistry(), null);
         harness.start();
-        model.emit(ModelEvent.toolCall(new ToolCall("bad-1", "not_declared", Collections.<String, Object>emptyMap())));
+        model.emit(ModelEvent.toolCall(new ToolCall("bad-1", "send_message", Collections.<String, Object>emptyMap())));
         assertNotNull(model.lastToolResult);
         assertFalse(model.lastToolResult.success());
-        assertEquals("bad-1", model.lastToolResult.callId());
         assertEquals("TOOL_NOT_AVAILABLE", model.lastToolResult.errorCode());
         harness.close();
     }
@@ -82,132 +77,52 @@ public class CrewMateHarnessIntegrationTest {
     }
 
     @Test
-    public void firstSendCannotExecuteBeforeApproval() {
-        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
+    public void findContactStoresVisiblePersonAndGoal() {
         CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
-        execute(tools.registry(), call("find-1", "find_contact", map("query", "John", "goal", "Dinner tomorrow")));
-        execute(tools.registry(), call("draft-1", "draft_message", map("content", "John，明天晚上有空一起吃飯嗎？")));
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
 
-        final AtomicInteger completed = new AtomicInteger();
-        tools.registry().execute(call("send-1", "send_message", map("content", "John，明天晚上有空一起吃飯嗎？")),
-                new ToolExecutor.Completion() {
-                    @Override public void complete(ToolResult result) { completed.incrementAndGet(); }
-                });
+        ToolResult result = execute(tools.registry(), call("find", "find_contact",
+                map("query", "Reception", "goal", "Ask where to put the laundry bag")));
 
-        assertEquals(0, backend.sendCount());
-        assertEquals(0, completed.get());
-        assertNotNull(session.pendingApproval());
-        assertFalse(session.delegationAuthorized());
-        assertEquals(CommunicationSession.Status.WAITING_FOR_APPROVAL, session.status());
-        backend.shutdown();
-    }
-
-    @Test
-    public void approvedMessageCanOnlySendOnce() {
-        FakeMessagingBackend backend = new FakeMessagingBackend(1000L);
-        CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
-        execute(tools.registry(), call("find-1", "find_contact", map("query", "John", "goal", "Dinner tomorrow")));
-        execute(tools.registry(), call("draft-1", "draft_message", map("content", "Dinner tomorrow?")));
-        tools.registry().execute(call("send-1", "send_message", map("content", "Dinner tomorrow?")), new ToolExecutor.Completion() {
-            @Override public void complete(ToolResult result) {}
-        });
-
-        assertTrue(tools.approvePending(null));
-        assertFalse(tools.approvePending(null));
-        assertTrue(session.delegationAuthorized());
-        assertEquals(1, backend.sendCount());
-        backend.shutdown();
-    }
-
-    @Test
-    public void delegatedRoutineFollowupSendsWithoutSecondApproval() {
-        FakeMessagingBackend backend = new FakeMessagingBackend(5000L);
-        CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
-        execute(tools.registry(), call("find", "find_contact", map("query", "John", "goal", "Find a dinner time tomorrow")));
-        execute(tools.registry(), call("draft-1", "draft_message", map("content", "Are you free for dinner tomorrow?")));
-        tools.registry().execute(call("send-1", "send_message", map("content", "Are you free for dinner tomorrow?")), new ToolExecutor.Completion() {
-            @Override public void complete(ToolResult result) {}
-        });
-        assertTrue(tools.approvePending(null));
-        assertTrue(session.delegationAuthorized());
-        assertEquals(1, backend.sendCount());
-
-        execute(tools.registry(), call("draft-2", "draft_message", map("content", "Would 7 PM work?")));
-        ToolResult result = execute(tools.registry(), call("send-2", "send_message", map("content", "Would 7 PM work?")));
         assertTrue(result.success());
-        assertNull(session.pendingApproval());
-        assertEquals(2, backend.sendCount());
-        backend.shutdown();
+        assertEquals("Reception", session.targetPerson());
+        assertEquals("Ask where to put the laundry bag", session.goal());
     }
 
     @Test
-    public void delegatedHighRiskFollowupStillRequiresApproval() {
-        FakeMessagingBackend backend = new FakeMessagingBackend(5000L);
+    public void requestUserInputStoresQuestion() {
         CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
-        execute(tools.registry(), call("find", "find_contact", map("query", "Hotel", "goal", "Ask about late checkout options")));
-        execute(tools.registry(), call("draft-1", "draft_message", map("content", "Do you offer late checkout?")));
-        tools.registry().execute(call("send-1", "send_message", map("content", "Do you offer late checkout?")), new ToolExecutor.Completion() {
-            @Override public void complete(ToolResult result) {}
-        });
-        assertTrue(tools.approvePending(null));
-        assertTrue(session.delegationAuthorized());
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
 
-        execute(tools.registry(), call("draft-2", "draft_message", map("content", "Please book the $30 late checkout.")));
-        final AtomicInteger completed = new AtomicInteger();
-        tools.registry().execute(call("send-2", "send_message", map("content", "Please book the $30 late checkout.")), new ToolExecutor.Completion() {
-            @Override public void complete(ToolResult result) { completed.incrementAndGet(); }
-        });
-        assertEquals(1, backend.sendCount());
-        assertEquals(0, completed.get());
-        assertNotNull(session.pendingApproval());
-        assertEquals(CommunicationSession.Status.WAITING_FOR_APPROVAL, session.status());
-        backend.shutdown();
+        ToolResult result = execute(tools.registry(), call("ask", "request_user_input",
+                map("question", "最多可以接受多少費用？")));
+
+        assertTrue(result.success());
+        assertEquals(CommunicationSession.Status.NEEDS_USER_INPUT, session.status());
+        assertEquals("最多可以接受多少費用？", session.pendingUserQuestion());
     }
 
     @Test
     public void completeTaskStoresOutcomeAndCompletedState() {
-        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
         CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
-        execute(tools.registry(), call("find", "find_contact", map("query", "John", "goal", "Confirm dinner time")));
-        ToolResult result = execute(tools.registry(), call("done", "complete_task", map("summary", "John confirmed dinner tomorrow at 7 PM.")));
-        assertTrue(result.success());
-        assertEquals("done", result.callId());
-        assertEquals(CommunicationSession.Status.COMPLETED, session.status());
-        assertEquals("John confirmed dinner tomorrow at 7 PM.", session.outcomeSummary());
-        backend.shutdown();
-    }
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
+        execute(tools.registry(), call("find", "find_contact",
+                map("query", "Reception", "goal", "Ask where to put the laundry bag")));
 
-    @Test
-    public void completeTaskIsRejectedWhileSendAwaitsApproval() {
-        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
-        CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, noOpListener());
-        execute(tools.registry(), call("find", "find_contact", map("query", "John", "goal", "Confirm dinner")));
-        execute(tools.registry(), call("draft", "draft_message", map("content", "Dinner tomorrow?")));
-        tools.registry().execute(call("send", "send_message", map("content", "Dinner tomorrow?")), new ToolExecutor.Completion() {
-            @Override public void complete(ToolResult result) {}
-        });
-        ToolResult result = execute(tools.registry(), call("done", "complete_task", map("summary", "Done")));
-        assertFalse(result.success());
-        assertEquals("APPROVAL_PENDING", result.errorCode());
-        assertEquals(CommunicationSession.Status.WAITING_FOR_APPROVAL, session.status());
-        backend.shutdown();
+        ToolResult result = execute(tools.registry(), call("done", "complete_task",
+                map("summary", "Reception confirmed the laundry bag should be left by the door.")));
+
+        assertTrue(result.success());
+        assertEquals(CommunicationSession.Status.COMPLETED, session.status());
+        assertEquals("Reception confirmed the laundry bag should be left by the door.", session.outcomeSummary());
     }
 
     @Test
     public void conversationMessagesKeepInsertionOrder() {
         CommunicationSession session = new CommunicationSession();
-        Message first = new Message("1", Message.Sender.USER, "MATE", "first", 1L, Message.Status.RECEIVED);
-        Message second = new Message("2", Message.Sender.MATE, "John", "second", 2L, Message.Status.SENT);
-        Message third = new Message("3", Message.Sender.OTHER_PERSON, "MATE", "third", 3L, Message.Status.RECEIVED);
-        session.addMessage(first);
-        session.addMessage(second);
-        session.addMessage(third);
+        session.addMessage(new Message("1", Message.Sender.USER, "MATE", "first", 1L, Message.Status.RECEIVED));
+        session.addMessage(new Message("2", Message.Sender.MATE, "Reception", "second", 2L, Message.Status.INFO));
+        session.addMessage(new Message("3", Message.Sender.OTHER_PERSON, "MATE", "third", 3L, Message.Status.RECEIVED));
         assertEquals("1", session.messages().get(0).id);
         assertEquals("2", session.messages().get(1).id);
         assertEquals("3", session.messages().get(2).id);
@@ -225,54 +140,9 @@ public class CrewMateHarnessIntegrationTest {
         assertTrue(serialized.contains("STARTED"));
     }
 
-    @Test
-    public void fakeEndToEndFlowShowsReplyAfterApproval() throws Exception {
-        final CountDownLatch replyLatch = new CountDownLatch(1);
-        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
-        CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, new CrewMateToolRegistry.Listener() {
-            @Override public void onSessionChanged(CommunicationSession session) {}
-            @Override public void onApprovalRequired(CommunicationSession session, PendingApproval approval) {}
-            @Override public void onExternalReply(CommunicationSession session, Message message) { replyLatch.countDown(); }
-            @Override public void onUserInputRequested(CommunicationSession session, String question, String reason) {}
-        });
-
-        execute(tools.registry(), call("find", "find_contact", map(
-                "query", "John",
-                "goal", "幫我問 John 明天晚上有沒有空吃飯")));
-        execute(tools.registry(), call("draft", "draft_message", map(
-                "content", "John，明天晚上有空一起吃飯嗎？")));
-
-        final AtomicReference<ToolResult> sendResult = new AtomicReference<ToolResult>();
-        tools.registry().execute(call("send", "send_message", map(
-                "content", "John，明天晚上有空一起吃飯嗎？")), new ToolExecutor.Completion() {
-            @Override public void complete(ToolResult result) { sendResult.set(result); }
-        });
-
-        assertNotNull(session.pendingApproval());
-        assertEquals(0, backend.sendCount());
-        assertTrue(tools.approvePending(null));
-        assertTrue(replyLatch.await(2, TimeUnit.SECONDS));
-        assertEquals(1, backend.sendCount());
-        assertNotNull(sendResult.get());
-        assertEquals("send", sendResult.get().callId());
-        assertTrue(sendResult.get().success());
-
-        boolean sawReply = false;
-        for (Message message : session.messages()) {
-            if (message.sender == Message.Sender.OTHER_PERSON && message.content().contains("7 點")) {
-                sawReply = true;
-            }
-        }
-        assertTrue(sawReply);
-        backend.shutdown();
-    }
-
     private static CrewMateToolRegistry.Listener noOpListener() {
         return new CrewMateToolRegistry.Listener() {
             @Override public void onSessionChanged(CommunicationSession session) {}
-            @Override public void onApprovalRequired(CommunicationSession session, PendingApproval approval) {}
-            @Override public void onExternalReply(CommunicationSession session, Message message) {}
             @Override public void onUserInputRequested(CommunicationSession session, String question, String reason) {}
         };
     }
@@ -282,7 +152,7 @@ public class CrewMateHarnessIntegrationTest {
         registry.execute(call, new ToolExecutor.Completion() {
             @Override public void complete(ToolResult value) { result.set(value); }
         });
-        assertNotNull("Expected synchronous fake tool completion for " + call.name(), result.get());
+        assertNotNull(result.get());
         return result.get();
     }
 

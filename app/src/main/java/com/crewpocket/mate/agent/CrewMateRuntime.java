@@ -1,9 +1,7 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
-import com.crewpocket.mate.model.PendingApproval;
 import com.crewpocket.mate.model.SpeechAudience;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
 import com.magic76.crew.agent.AgentEvent;
@@ -12,37 +10,31 @@ import com.magic76.crew.agent.ModelSession;
 
 import java.util.List;
 
-/**
- * Crew Mate's thin product runtime around the shared AgentHarness.
- * It owns communication state, approval, provider callbacks and UI projection only.
- */
+/** Product runtime for Crew Mate's in-person Gemini Live conversation. */
 public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToolRegistry.Listener {
     public interface Listener {
         void onSessionChanged(CommunicationSession session);
-        void onApprovalRequired(CommunicationSession session, PendingApproval approval);
         void onRuntimeStatus(String status);
     }
 
     private final CommunicationSession session;
     private final AgentTraceRecorder traceRecorder = new AgentTraceRecorder();
     private final TurnTextAccumulator modelTurn = new TurnTextAccumulator();
-    private final CrewMateToolRegistry tools;
     private final AgentHarness harness;
     private final Listener listener;
     private volatile boolean closed;
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
     private volatile boolean externalSpeechObserved;
 
-    public CrewMateRuntime(ModelSession modelSession, MessagingBackend backend, Listener listener) {
-        this(new CommunicationSession(), modelSession, backend, listener);
+    public CrewMateRuntime(ModelSession modelSession, Listener listener) {
+        this(new CommunicationSession(), modelSession, listener);
     }
 
-    public CrewMateRuntime(CommunicationSession session, ModelSession modelSession,
-                           MessagingBackend backend, Listener listener) {
+    public CrewMateRuntime(CommunicationSession session, ModelSession modelSession, Listener listener) {
         if (session == null) throw new IllegalArgumentException("session is null");
         this.session = session;
         this.listener = listener;
-        tools = new CrewMateToolRegistry(session, backend, this);
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, this);
         harness = new AgentHarness(new CrewMateAgentSpec(), modelSession, tools.registry(), this);
     }
 
@@ -54,10 +46,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public synchronized void setSpeechAudience(SpeechAudience audience) {
         SpeechAudience next = audience == null ? SpeechAudience.MATE_HANDLING : audience;
         if (speechAudience == next) return;
-        // Finish any visible spoken model turn under the audience that actually heard it.
         commitModelTurn();
         speechAudience = next;
-        // Every physical handoff starts silent. Mate may answer only after the other person actually speaks.
         externalSpeechObserved = false;
     }
 
@@ -70,7 +60,6 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (closed) return;
         closed = true;
         modelTurn.clear();
-        tools.cancelPending();
         harness.close();
     }
 
@@ -78,7 +67,6 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (!closed) harness.interrupt();
     }
 
-    /** Typed private instruction is independent of the live microphone audience. */
     public void submitPrivateText(String text) {
         if (closed || session.userDirectControl()) return;
         String value = text == null ? "" : text.trim();
@@ -92,67 +80,12 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         harness.submitText(value);
     }
 
-    /** Rehydrates model context after a background reply without creating a fake private user message. */
-    public void resumePersistedTask() {
-        if (closed || session.userDirectControl()) return;
-        StringBuilder context = new StringBuilder();
-        context.append("RESUME_DELEGATED_COMMUNICATION_TASK\n")
-                .append("Target: ").append(session.targetPerson()).append("\n")
-                .append("Goal: ").append(session.goal()).append("\n")
-                .append("Delegated: ").append(session.delegationAuthorized()).append("\n")
-                .append("Recent context:\n");
-        List<Message> messages = session.messages();
-        int start = Math.max(0, messages.size() - 16);
-        for (int i = start; i < messages.size(); i++) {
-            Message message = messages.get(i);
-            if (message.sender == Message.Sender.USER) {
-                context.append("PRIVATE_USER_BRIEF: ").append(message.content()).append("\n");
-            } else if (message.sender == Message.Sender.OTHER_PERSON) {
-                context.append("OTHER_PERSON: ").append(message.content()).append("\n");
-            } else if (message.sender == Message.Sender.MATE && !"USER".equals(message.recipient)) {
-                context.append("MATE_TO_OTHER: ").append(message.content()).append("\n");
-            }
-        }
-        context.append("Continue the delegated task yourself if the next step is routine and within scope. "
-                + "If a new consequential decision is required, call request_user_input. "
-                + "If the goal is achieved, call complete_task. Do not resend any message already present in the timeline.");
-        session.setStatus(CommunicationSession.Status.THINKING);
-        notifyChanged();
-        harness.submitText(context.toString());
-    }
-
-    /** Clear direct-control state without inventing a remote/provider event. */
     public void releaseUserDirectControl() {
         if (closed) return;
         session.setUserDirectControl(false);
         notifyChanged();
     }
 
-    /** Remote-mode continuation after the user explicitly returns control to Mate. */
-    public void resumeAfterUserTakeover() {
-        if (closed) return;
-        releaseUserDirectControl();
-        resumePersistedTask();
-    }
-
-    /** Feed a provider watch reply into the same shared Harness runtime; never starts a second loop. */
-    public void acceptExternalReply(MessagingBackend.RemoteMessage reply) {
-        if (closed || reply == null || reply.outgoing) return;
-        if (!reply.id.isEmpty() && session.findMessage(reply.id) != null) return;
-        Message message = new Message(reply.id, Message.Sender.OTHER_PERSON, "MATE",
-                reply.content, reply.timestamp, Message.Status.RECEIVED);
-        session.addMessage(message);
-        if (session.userDirectControl()) {
-            session.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
-            notifyChanged();
-            return;
-        }
-        session.setStatus(CommunicationSession.Status.THINKING);
-        notifyChanged();
-        onExternalReply(session, message);
-    }
-
-    /** Private input transcription is display/state only; Gemini already received the corresponding audio. */
     public void recordUserTranscript(String text) {
         if (closed || session.userDirectControl() || speechAudience != SpeechAudience.PRIVATE_TO_MATE) return;
         String value = text == null ? "" : text.trim();
@@ -165,7 +98,6 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         notifyChanged();
     }
 
-    /** External live speech is visible product state but is not submitted again because Gemini heard the audio. */
     public void recordExternalSpeechTranscript(String text) {
         if (closed || session.userDirectControl() || speechAudience != SpeechAudience.EXTERNAL_WITH_MATE) return;
         String value = text == null ? "" : text.trim();
@@ -175,9 +107,6 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         session.setStatus(CommunicationSession.Status.THINKING);
         notifyChanged();
     }
-
-    public boolean approvePending(String editedContent) { return !closed && !session.userDirectControl() && tools.approvePending(editedContent); }
-    public boolean cancelPending() { return !closed && tools.cancelPending(); }
 
     @Override
     public void onAgentEvent(AgentEvent event) {
@@ -228,10 +157,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     }
 
     private boolean preserveProductStateOnRuntimeStop(CommunicationSession.Status status) {
-        return status == CommunicationSession.Status.WAITING_FOR_REPLY
-                || status == CommunicationSession.Status.REPLY_RECEIVED
-                || status == CommunicationSession.Status.NEEDS_USER_INPUT
-                || status == CommunicationSession.Status.WAITING_FOR_APPROVAL
+        return status == CommunicationSession.Status.NEEDS_USER_INPUT
                 || status == CommunicationSession.Status.COMPLETED;
     }
 
@@ -239,7 +165,6 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         String completed = modelTurn.take();
         if (completed.isEmpty()) return;
         if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
-            // Never let a model-only turn create a fake physical conversation.
             if (!externalSpeechObserved) return;
             String recipient = session.targetPerson().isEmpty() ? "OTHER_PERSON" : session.targetPerson();
             session.addMessage(new Message(Message.Sender.MATE, recipient, completed, Message.Status.INFO));
@@ -251,32 +176,9 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         }
     }
 
-    @Override public void onSessionChanged(CommunicationSession changed) {
+    @Override
+    public void onSessionChanged(CommunicationSession changed) {
         if (!closed) notifyChanged();
-    }
-
-    @Override
-    public void onApprovalRequired(CommunicationSession changed, PendingApproval approval) {
-        if (closed) return;
-        notifyChanged();
-        emitStatus("Waiting for approval");
-        if (listener != null) listener.onApprovalRequired(changed, approval);
-    }
-
-    @Override
-    public void onExternalReply(CommunicationSession changed, Message message) {
-        if (closed) return;
-        if (changed.userDirectControl()) {
-            changed.setStatus(CommunicationSession.Status.REPLY_RECEIVED);
-            notifyChanged();
-            return;
-        }
-        notifyChanged();
-        emitStatus("Thinking");
-        String person = changed.targetPerson().isEmpty() ? "OTHER_PERSON" : changed.targetPerson();
-        harness.submitText("EXTERNAL_MESSAGE from " + person + ": " + message.content()
-                + "\nThis is a delegated communication task. Continue the conversation yourself when the next step is routine and within the approved goal. "
-                + "If the goal is achieved, call complete_task. If a new consequential decision is needed, call request_user_input.");
     }
 
     @Override
@@ -297,10 +199,6 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public static String displayStatus(CommunicationSession.Status status) {
         if (status == null) return "Thinking";
         switch (status) {
-            case WAITING_FOR_APPROVAL: return "Waiting for approval";
-            case SENDING: return "Sending";
-            case WAITING_FOR_REPLY: return "Waiting for reply";
-            case REPLY_RECEIVED: return "Reply received";
             case NEEDS_USER_INPUT: return "Needs your input";
             case COMPLETED: return "Completed";
             case STOPPED: return "Paused";

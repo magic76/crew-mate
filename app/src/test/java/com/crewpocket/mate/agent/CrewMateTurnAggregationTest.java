@@ -1,6 +1,5 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.FakeMessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
@@ -17,9 +16,8 @@ public class CrewMateTurnAggregationTest {
     @Test
     public void modelTextDeltasBecomeOnePrivateMessageOnTurnComplete() {
         RecordingModelSession model = new RecordingModelSession();
-        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
-        CommunicationSession session = new CommunicationSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, null);
+                CommunicationSession session = new CommunicationSession();
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, null);
         runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
         runtime.start();
 
@@ -33,15 +31,13 @@ public class CrewMateTurnAggregationTest {
         assertEquals("好的我幫你問看看", lastPrivateMateMessage(session));
 
         runtime.close();
-        backend.shutdown();
-    }
+            }
 
     @Test
     public void interruptedModelTurnIsNotPersistedAsHalfMessage() {
         RecordingModelSession model = new RecordingModelSession();
-        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
-        CommunicationSession session = new CommunicationSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, null);
+                CommunicationSession session = new CommunicationSession();
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, null);
         runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
         runtime.start();
 
@@ -51,8 +47,7 @@ public class CrewMateTurnAggregationTest {
 
         assertEquals(0, privateMateMessageCount(session));
         runtime.close();
-        backend.shutdown();
-    }
+            }
 
     private static int privateMateMessageCount(CommunicationSession session) {
         int count = 0;
