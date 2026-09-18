@@ -75,6 +75,11 @@ public class MainActivity extends Activity {
     private LinearLayout taskComposerCard;
     private EditText taskInput;
     private Button taskInputButton;
+    private Button taskVoiceButton;
+    private LinearLayout modeActions;
+    private LinearLayout utilities;
+    private Button newTaskButton;
+    private Button historyButton;
     private LinearLayout audienceCard;
     private TextView audienceTitle;
     private TextView audienceDetail;
@@ -167,7 +172,7 @@ public class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         titleBox.addView(title);
         TextView subtitle = new TextView(this);
-        subtitle.setText("先告訴 Mate 任務，再把手機交給要溝通的人。");
+        subtitle.setText("把想說的交給 Mate。");
         subtitle.setTextSize(12);
         subtitle.setTextColor(muted);
         subtitle.setPadding(0, dp(2), 0, 0);
@@ -200,13 +205,23 @@ public class MainActivity extends Activity {
         taskComposerCard.setPadding(dp(14), dp(12), dp(14), dp(12));
         taskComposerCard.setBackground(roundRect(surface, 18));
         TextView composerLabel = new TextView(this);
-        composerLabel.setText("告訴 Mate 你要做什麼");
+        composerLabel.setText("直接說，或打字");
         composerLabel.setTextColor(text);
-        composerLabel.setTextSize(13);
+        composerLabel.setTextSize(16);
         composerLabel.setTypeface(Typeface.DEFAULT_BOLD);
         taskComposerCard.addView(composerLabel);
+
+        taskVoiceButton = actionButton("🎙  說給 Mate 聽", accent);
+        taskVoiceButton.setTextSize(14);
+        taskVoiceButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { handlePrimaryAction(); }
+        });
+        LinearLayout.LayoutParams voiceLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        voiceLp.setMargins(0, dp(12), 0, dp(12));
+        taskComposerCard.addView(taskVoiceButton, voiceLp);
+
         taskInput = new EditText(this);
-        taskInput.setHint("例如：幫我問能不能延後退房，超過 500 泰銖先問我");
+        taskInput.setHint("例如：幫我問櫃台能不能延後退房，超過 500 泰銖先問我");
         taskInput.setTextColor(text);
         taskInput.setHintTextColor(muted);
         taskInput.setTextSize(13);
@@ -218,7 +233,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         inputLp.setMargins(0, dp(10), 0, dp(8));
         taskComposerCard.addView(taskInput, inputLp);
-        taskInputButton = actionButton("用文字交代", accentSurface);
+        taskInputButton = actionButton("送出文字", accentSurface);
         taskInputButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { submitTypedBrief(); }
         });
@@ -269,7 +284,7 @@ public class MainActivity extends Activity {
         privateLp.setMargins(0, dp(6), 0, dp(10));
         root.addView(privateScroll, privateLp);
 
-        LinearLayout modeActions = new LinearLayout(this);
+        modeActions = new LinearLayout(this);
         modeActions.setOrientation(LinearLayout.HORIZONTAL);
         primaryButton = actionButton("🔒 交代給 Mate", accent);
         primaryButton.setTextSize(13);
@@ -286,20 +301,20 @@ public class MainActivity extends Activity {
         modeActions.addView(directButton, directLp);
         root.addView(modeActions);
 
-        LinearLayout utilities = new LinearLayout(this);
+        utilities = new LinearLayout(this);
         utilities.setOrientation(LinearLayout.HORIZONTAL);
-        Button newTask = actionButton("新任務", surface2);
-        newTask.setOnClickListener(new View.OnClickListener() {
+        newTaskButton = actionButton("新任務", surface2);
+        newTaskButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { startFreshTask(); }
         });
-        utilities.addView(newTask, new LinearLayout.LayoutParams(0, dp(42), 1f));
-        Button history = actionButton("紀錄", surface2);
-        history.setOnClickListener(new View.OnClickListener() {
+        utilities.addView(newTaskButton, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        historyButton = actionButton("紀錄", surface2);
+        historyButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showHistory(); }
         });
         LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
         historyLp.setMargins(dp(8), 0, 0, 0);
-        utilities.addView(history, historyLp);
+        utilities.addView(historyButton, historyLp);
         LinearLayout.LayoutParams utilitiesLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         utilitiesLp.setMargins(0, dp(8), 0, 0);
         root.addView(utilities, utilitiesLp);
@@ -936,50 +951,102 @@ public class MainActivity extends Activity {
     private void renderSession(CommunicationSession session) {
         boolean active = session != null;
         boolean inPerson = isInPersonMode();
+        boolean privateEditing = speechAudience == SpeechAudience.PRIVATE_TO_MATE;
+        boolean taskIsReady = taskReady(session);
         boolean publicConversation = active && (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
                 || speechAudience == SpeechAudience.USER_DIRECT || hasExternalMessages(session));
-        externalSectionTitle.setVisibility(active && (!inPerson || publicConversation) ? View.VISIBLE : View.GONE);
-        externalScroll.setVisibility(active && (!inPerson || publicConversation) ? View.VISIBLE : View.GONE);
-        privateSectionTitle.setVisibility(active && (!inPerson || !publicConversation) ? View.VISIBLE : View.GONE);
-        privateScroll.setVisibility(active && (!inPerson || !publicConversation) ? View.VISIBLE : View.GONE);
-        taskComposerCard.setVisibility((!publicConversation || speechAudience == SpeechAudience.PRIVATE_TO_MATE)
-                && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+
+        if (inPerson) {
+            // Physical handoff has three product screens: setup -> confirm -> conversation.
+            statusText.setVisibility(active && (publicConversation
+                    || session.status() == CommunicationSession.Status.NEEDS_USER_INPUT)
+                    ? View.VISIBLE : View.GONE);
+            taskComposerCard.setVisibility((!active || !taskIsReady || privateEditing)
+                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+            audienceCard.setVisibility(privateEditing
+                    || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    || speechAudience == SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+
+            boolean showExternalTimeline = active && publicConversation && !privateEditing;
+            externalSectionTitle.setVisibility(showExternalTimeline ? View.VISIBLE : View.GONE);
+            externalScroll.setVisibility(showExternalTimeline ? View.VISIBLE : View.GONE);
+
+            // Private turns remain persisted, but the normal flow does not compete with a second timeline.
+            privateSectionTitle.setVisibility(View.GONE);
+            privateScroll.setVisibility(View.GONE);
+
+            modeActions.setVisibility(active && taskIsReady && !privateEditing
+                    ? View.VISIBLE : View.GONE);
+            utilities.setVisibility(active
+                    && session.status() == CommunicationSession.Status.COMPLETED
+                    ? View.VISIBLE : View.GONE);
+        } else {
+            statusText.setVisibility(active ? View.VISIBLE : View.GONE);
+            externalSectionTitle.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
+            externalScroll.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
+            privateSectionTitle.setVisibility(active && !publicConversation ? View.VISIBLE : View.GONE);
+            privateScroll.setVisibility(active && !publicConversation ? View.VISIBLE : View.GONE);
+            taskComposerCard.setVisibility((!publicConversation || privateEditing)
+                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+            audienceCard.setVisibility(View.VISIBLE);
+            modeActions.setVisibility(active ? View.VISIBLE : View.GONE);
+            utilities.setVisibility(active ? View.VISIBLE : View.GONE);
+        }
+
         if (!active) {
-            taskText.setText("第 1 步 · 設定任務\n\n直接說，或在下方打字告訴 Mate：你要跟誰溝通、想達成什麼、有哪些限制。");
-            taskInputButton.setText("用文字交代");
+            taskText.setVisibility(View.VISIBLE);
+            taskText.setText("你想讓 Mate 幫你處理什麼？\n\n跟誰說、想要什麼結果，有限制就一起講。");
+            taskText.setTextSize(20);
+            taskInputButton.setText("送出文字");
+            taskVoiceButton.setText("🎙  說給 Mate 聽");
             approvalCard.setVisibility(View.GONE);
+            audienceCard.setVisibility(View.GONE);
+            modeActions.setVisibility(View.GONE);
+            utilities.setVisibility(View.GONE);
             renderAudience(null);
             renderControls(null);
             return;
         }
 
         String person = session.targetPerson().isEmpty() ? "尚未確認" : session.targetPerson();
-        String goal = session.goal().isEmpty() ? "Mate 正在整理…" : session.goal();
-        String delegation;
-        if (isInPersonMode()) {
-            delegation = taskReady(session)
-                    ? "✓ Mate 已理解。下一步直接按「開始幫我談」，再把手機交給對方。"
-                    : "先把任務說完或打完，Mate 會整理出對象與目標。";
-        } else {
-            delegation = session.delegationAuthorized()
-                    ? "Mate 已接手一般往返；重要承諾仍會回來問你"
-                    : "第一則對外訊息會先讓你確認";
-        }
+        String goal = session.goal().isEmpty() ? "" : session.goal();
         StringBuilder task = new StringBuilder();
-        task.append("任務\n")
-                .append("對象：").append(person).append("\n")
-                .append("目標：").append(goal);
-        String brief = latestPrivateBrief(session);
-        if (!brief.isEmpty()) task.append("\n\n你的交代：").append(brief);
-        task.append("\n\n").append(delegation);
+
+        if (inPerson) {
+            if (publicConversation) {
+                task.append("正在跟 ").append(person).append(" 溝通");
+                if (!goal.isEmpty()) task.append("\n").append(goal);
+                taskText.setTextSize(14);
+            } else if (taskIsReady) {
+                task.append("Mate 已理解 ✓\n\n")
+                        .append("跟誰：").append(person).append("\n")
+                        .append("要做什麼：").append(goal);
+                taskText.setTextSize(17);
+            } else {
+                task.append("正在理解你的任務…");
+                String brief = latestPrivateBrief(session);
+                if (!brief.isEmpty()) task.append("\n\n").append(brief);
+                taskText.setTextSize(16);
+            }
+        } else {
+            task.append("任務\n")
+                    .append("對象：").append(person).append("\n")
+                    .append("目標：").append(goal.isEmpty() ? "Mate 正在整理…" : goal);
+            String brief = latestPrivateBrief(session);
+            if (!brief.isEmpty()) task.append("\n\n你的交代：").append(brief);
+            taskText.setTextSize(14);
+        }
+
         if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會自主送新訊息。");
         if (!session.pendingUserQuestion().isEmpty()) task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
         if (!session.outcomeSummary().isEmpty()) task.append("\n\n結果：").append(session.outcomeSummary());
+
         taskText.setText(task.toString());
-        externalSectionTitle.setText(isInPersonMode()
-                ? "第 2 步 · 對話紀錄 · Mate ↔ " + person
+        taskText.setVisibility(privateEditing ? View.GONE : View.VISIBLE);
+        externalSectionTitle.setText(inPerson
+                ? "對話 · Mate ↔ " + person
                 : "對外紀錄 · Mate ↔ " + person);
-        privateSectionTitle.setText("第 1 步 · 私人交代");
+        privateSectionTitle.setText("🔒 私人 · 你 ↔ Mate");
         renderTimelines(session, person);
 
         PendingApproval approval = session.pendingApproval();
@@ -1046,35 +1113,46 @@ public class MainActivity extends Activity {
 
     private void renderControls(CommunicationSession session) {
         if (session == null) {
-            primaryButton.setText("🎙 用語音交代");
+            primaryButton.setText("開始");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
-            taskInputButton.setText("用文字交代");
+            taskVoiceButton.setText("🎙  說給 Mate 聽");
+            taskInputButton.setText("送出文字");
             return;
         }
+
         if (session.status() == CommunicationSession.Status.COMPLETED) {
-            primaryButton.setText("交代新任務");
+            primaryButton.setText("建立新任務");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             return;
         }
+
         if (speechAudience == SpeechAudience.USER_DIRECT) {
             primaryButton.setText("讓 Mate 繼續");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
             directButton.setVisibility(View.GONE);
             return;
         }
+
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             primaryButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
                     ? "完成補充"
                     : "我說完了");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
+            taskVoiceButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    ? "✓  完成補充"
+                    : "✓  我說完了");
             taskInputButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    ? "文字補充並返回對話"
-                    : "用文字交代");
+                    ? "送出文字補充"
+                    : "送出文字");
             return;
         }
+
+        taskVoiceButton.setText("🎙  繼續說");
+        taskInputButton.setText("送出文字");
+
         if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             primaryButton.setText("🔒 補充給 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
@@ -1083,25 +1161,32 @@ public class MainActivity extends Activity {
             directButton.setBackground(roundRect(direct, 11));
             return;
         }
+
         if (runtime == null && (session.status() == CommunicationSession.Status.REPLY_RECEIVED
                 || session.status() == CommunicationSession.Status.STOPPED)) {
             primaryButton.setText("讓 Mate 繼續");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
-            primaryButton.setText("🔒 回答 Mate");
+            primaryButton.setText("回答 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
         } else if (isInPersonMode() && taskReady(session)) {
             primaryButton.setText("開始幫我談");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else {
-            primaryButton.setText("🎙 再補充");
+            primaryButton.setText("繼續");
             primaryButton.setBackground(roundRect(accent, 11));
         }
-        boolean canSupplement = isInPersonMode() && session != null;
-        directButton.setVisibility(canSupplement && taskReady(session) ? View.VISIBLE : View.GONE);
-        directButton.setText("🔒 補充條件");
-        directButton.setBackground(roundRect(accent, 11));
-        taskInputButton.setText("用文字補充");
+
+        boolean canSupplement = isInPersonMode() && taskReady(session);
+        directButton.setVisibility(canSupplement ? View.VISIBLE : View.GONE);
+        directButton.setText(publicConversationActive() ? "我要自己說" : "修改任務");
+        directButton.setBackground(roundRect(publicConversationActive() ? direct : surface2, 11));
+    }
+
+    private boolean publicConversationActive() {
+        return speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                || speechAudience == SpeechAudience.USER_DIRECT
+                || hasExternalMessages(viewedSession);
     }
 
     private boolean hasExternalMessages(CommunicationSession session) {
