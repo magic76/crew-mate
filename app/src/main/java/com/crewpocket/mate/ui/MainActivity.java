@@ -1395,29 +1395,81 @@ public class MainActivity extends Activity {
             }
         }
 
+        final LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(14));
+        sheet.setBackground(roundRect(surface, 18));
+
+        TextView header = new TextView(this);
+        header.setText(session.targetPerson().isEmpty() ? "任務詳情" : session.targetPerson());
+        header.setTextColor(text);
+        header.setTextSize(20);
+        header.setTypeface(Typeface.DEFAULT_BOLD);
+        header.setPadding(0, 0, 0, dp(8));
+        sheet.addView(header);
+
         ScrollView scroll = new ScrollView(this);
-        scroll.setPadding(dp(12), 0, dp(12), 0);
+        scroll.setFillViewport(false);
+        scroll.setClipToPadding(false);
         scroll.addView(content);
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int detailHeight = Math.max(dp(280), (int) (screenHeight * 0.56f));
+        sheet.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, detailHeight));
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle(session.targetPerson().isEmpty() ? "任務詳情" : session.targetPerson())
-                .setView(scroll)
-                .setNegativeButton("關閉", null);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(sheet)
+                .create();
 
-        if (session.status() == CommunicationSession.Status.COMPLETED) {
-            builder.setPositiveButton("以此建立新任務", new DialogInterface.OnClickListener() {
-                @Override public void onClick(DialogInterface dialog, int which) {
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, dp(10), 0, 0);
+
+        Button close = actionButton("關閉", surface2);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dialog.dismiss(); }
+        });
+        actions.addView(close, new LinearLayout.LayoutParams(0, dp(44), 1f));
+
+        Button primary = actionButton(
+                session.status() == CommunicationSession.Status.COMPLETED
+                        ? "以此建立新任務"
+                        : "繼續此任務",
+                accentSurface);
+        primary.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                dialog.dismiss();
+                if (session.status() == CommunicationSession.Status.COMPLETED) {
                     requestCloneHistoricalTask(session);
-                }
-            });
-        } else {
-            builder.setPositiveButton("繼續此任務", new DialogInterface.OnClickListener() {
-                @Override public void onClick(DialogInterface dialog, int which) {
+                } else {
                     resumeHistoricalSession(session);
                 }
-            });
+            }
+        });
+        LinearLayout.LayoutParams primaryLp = new LinearLayout.LayoutParams(0, dp(44), 1.35f);
+        primaryLp.setMargins(dp(8), 0, 0, 0);
+        actions.addView(primary, primaryLp);
+        sheet.addView(actions);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface ignored) { styleHistoryDialog(dialog); }
+        });
+        dialog.show();
+    }
+
+    private void styleHistoryDialog(AlertDialog dialog) {
+        if (dialog == null) return;
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        window.setStatusBarColor(bg);
+        window.setNavigationBarColor(bg);
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(true);
         }
-        builder.show();
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int width = Math.min(screenWidth - dp(24), dp(680));
+        window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void addHistorySection(LinearLayout container, String label, String value) {
