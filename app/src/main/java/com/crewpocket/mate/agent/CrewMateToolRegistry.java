@@ -53,9 +53,7 @@ public final class CrewMateToolRegistry {
                 session.setOutcomeSummary("");
                 session.setUserDirectControl(false);
                 if (ready) session.setPendingUserQuestion("");
-                session.setStatus(ready
-                        ? CommunicationSession.Status.THINKING
-                        : CommunicationSession.Status.NEEDS_USER_INPUT);
+                session.setStatus(CommunicationSession.Status.THINKING);
                 notifyChanged();
 
                 Map<String, Object> payload = new LinkedHashMap<String, Object>();
