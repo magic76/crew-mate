@@ -5,11 +5,13 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
 import android.util.Base64;
 
+import com.crewpocket.mate.model.AudioOutputMode;
 import com.crewpocket.mate.model.SpeechAudience;
 import com.magic76.crew.agent.ModelEvent;
 import com.magic76.crew.agent.ModelSession;
@@ -69,6 +71,7 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
     private volatile String userLanguage = "AUTO";
     private volatile String otherPersonLanguage = "AUTO";
+    private volatile AudioOutputMode audioOutputMode = AudioOutputMode.MEDIA;
     private volatile boolean userAudioEnabled;
     private volatile boolean playbackEnabled;
     private AudioRecord recorder;
@@ -203,6 +206,18 @@ public final class GeminiLiveModelSession implements ModelSession {
     public boolean isUserAudioEnabled() { return userAudioEnabled; }
     public boolean isPlaybackEnabled() { return playbackEnabled; }
     public SpeechAudience speechAudience() { return speechAudience; }
+    public AudioOutputMode audioOutputMode() { return audioOutputMode; }
+
+    public synchronized void setAudioOutputMode(AudioOutputMode mode) {
+        AudioOutputMode next = mode == null ? AudioOutputMode.MEDIA : mode;
+        if (audioOutputMode == next) return;
+        audioOutputMode = next;
+        if (running && setupReady) {
+            releasePlayer();
+            applySystemAudioMode();
+            if (playbackEnabled) ensurePlayer();
+        }
+    }
 
     public synchronized void setConversationLanguages(String userValue, String otherValue) {
         userLanguage = normalizeLanguage(userValue);
@@ -502,11 +517,15 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     private synchronized void ensurePlayer() {
         if (!running || !setupReady || !playbackEnabled || player != null) return;
+        applySystemAudioMode();
         int minOutput = AudioTrack.getMinBufferSize(OUTPUT_RATE,
                 AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        int usage = audioOutputMode == AudioOutputMode.COMMUNICATION
+                ? AudioAttributes.USAGE_VOICE_COMMUNICATION
+                : AudioAttributes.USAGE_MEDIA;
         player = new AudioTrack.Builder()
                 .setAudioAttributes(new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setUsage(usage)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build())
                 .setAudioFormat(new AudioFormat.Builder()
@@ -570,7 +589,25 @@ public final class GeminiLiveModelSession implements ModelSession {
     private synchronized void stopAudio() {
         stopInputAudio();
         releasePlayer();
+        restoreSystemAudioMode();
         setSpeaking(false);
+    }
+
+    private void applySystemAudioMode() {
+        try {
+            AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (audioManager == null) return;
+            audioManager.setMode(audioOutputMode == AudioOutputMode.COMMUNICATION
+                    ? AudioManager.MODE_IN_COMMUNICATION
+                    : AudioManager.MODE_NORMAL);
+        } catch (Exception ignored) {}
+    }
+
+    private void restoreSystemAudioMode() {
+        try {
+            AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (audioManager != null) audioManager.setMode(AudioManager.MODE_NORMAL);
+        } catch (Exception ignored) {}
     }
 
     private synchronized void flushPlayback() {
