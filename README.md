@@ -364,3 +364,14 @@ The primary task controls are treated as a bottom dock rather than ordinary flow
 Saved task records can be removed from both the history card list and task detail view.
 
 Removal always requires confirmation. If the removed record is the currently active task, Crew Mate first stops the Live session, deletes the session, and returns to a fresh task screen. Removing another record does not disturb the current task.
+
+
+## Keep screen awake during Live calls
+
+While Gemini Live is `CONNECTING` or `ACTIVE`, Crew Mate applies Android's
+`FLAG_KEEP_SCREEN_ON` to the Activity window.
+
+- the screen will not turn off from the normal display timeout during an active Live session
+- when the call becomes `OFF` or `ERROR`, the flag is cleared and the device returns to its normal sleep policy
+- no WakeLock permission is required
+- the user can still lock the phone manually with the power button
