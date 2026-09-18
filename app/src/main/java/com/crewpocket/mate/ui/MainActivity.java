@@ -436,6 +436,15 @@ public class MainActivity extends Activity {
             return;
         }
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE && runtime != null) {
+            if (oneShotPrivateSupplement
+                    && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+                if (inputTurn.isEmpty()) {
+                    Toast.makeText(this, "先說你要補充的內容", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                flushInputTurn();
+                return;
+            }
             flushInputTurn();
             applyAudience(SpeechAudience.MATE_HANDLING);
             runtime.finalizeTaskBrief();
