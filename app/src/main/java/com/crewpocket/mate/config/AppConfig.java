@@ -3,10 +3,13 @@ package com.crewpocket.mate.config;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.crewpocket.mate.model.AudioOutputMode;
+
 public final class AppConfig {
     private static final String PREFS = "crew_mate";
     private static final String KEY_GEMINI_API_KEY = "gemini_api_key";
     private static final String KEY_VOICE = "voice";
+    private static final String KEY_AUDIO_OUTPUT_MODE = "audio_output_mode";
 
     private AppConfig() {}
 
@@ -24,6 +27,20 @@ public final class AppConfig {
 
     public static void setVoice(Context context, String value) {
         prefs(context).edit().putString(KEY_VOICE, clean(value).isEmpty() ? "Kore" : clean(value)).apply();
+    }
+
+    public static AudioOutputMode getAudioOutputMode(Context context) {
+        String value = prefs(context).getString(KEY_AUDIO_OUTPUT_MODE, AudioOutputMode.MEDIA.name());
+        try {
+            return AudioOutputMode.valueOf(value);
+        } catch (Exception ignored) {
+            return AudioOutputMode.MEDIA;
+        }
+    }
+
+    public static void setAudioOutputMode(Context context, AudioOutputMode mode) {
+        AudioOutputMode safe = mode == null ? AudioOutputMode.MEDIA : mode;
+        prefs(context).edit().putString(KEY_AUDIO_OUTPUT_MODE, safe.name()).apply();
     }
 
     private static String clean(String value) {
