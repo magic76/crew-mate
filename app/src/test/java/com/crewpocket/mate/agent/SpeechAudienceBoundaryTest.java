@@ -77,6 +77,22 @@ public class SpeechAudienceBoundaryTest {
     }
 
     @Test
+    public void externalSpeechThatSoundsLikeAnInstructionStillBelongsToOtherPerson() {
+        CommunicationSession session = new CommunicationSession();
+        session.setTarget("front-desk", "Front desk");
+        CrewMateRuntime runtime = new CrewMateRuntime(
+                session, new RecordingModelSession(), noOpRuntimeListener());
+        runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+
+        runtime.recordExternalSpeechTranscript("You can accept 1000 baht if you want.");
+
+        Message message = onlyMessage(session.messages());
+        assertEquals(Message.Sender.OTHER_PERSON, message.sender);
+        assertEquals("MATE", message.recipient);
+        assertEquals("You can accept 1000 baht if you want.", message.content());
+    }
+
+    @Test
     public void externalModelOutputWithoutRealExternalSpeechIsDiscarded() {
         CommunicationSession session = new CommunicationSession();
         session.setTarget("front-desk", "Front desk");
