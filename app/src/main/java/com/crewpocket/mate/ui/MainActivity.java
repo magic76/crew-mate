@@ -567,7 +567,10 @@ public class MainActivity extends Activity {
         int checked = languageIndex(current);
         new AlertDialog.Builder(this)
                 .setTitle(userSide ? ui("我的語言", "My language") : ui("對方語言", "Other person's language"))
-                .setSingleChoiceItems(LANGUAGE_LABELS, checked, new DialogInterface.OnClickListener() {
+                .setSingleChoiceItems(
+                        interfaceLanguage == InterfaceLanguage.EN ? LANGUAGE_LABELS_EN : LANGUAGE_LABELS_ZH,
+                        checked,
+                        new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         String code = LANGUAGE_CODES[Math.max(0, Math.min(which, LANGUAGE_CODES.length - 1))];
                         if (userSide) {
