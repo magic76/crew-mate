@@ -48,6 +48,45 @@ public class SpeechAudienceBoundaryTest {
     }
 
     @Test
+    public void privateTextInvalidatesPreviouslyReadyConsensus() {
+        CommunicationSession session = new CommunicationSession();
+        session.setConsensus(
+                "local-front-desk",
+                "Front desk",
+                "Ask for late checkout",
+                "Up to 500 THB",
+                "Ask before agreeing above 500 THB",
+                true);
+        CrewMateRuntime runtime = new CrewMateRuntime(
+                session, new RecordingModelSession(), noOpRuntimeListener());
+        runtime.start();
+
+        runtime.submitPrivateText("Actually, I only want to pay up to 300 baht.");
+
+        assertFalse(session.consensusReady());
+        runtime.close();
+    }
+
+    @Test
+    public void privateVoiceTranscriptInvalidatesPreviouslyReadyConsensus() {
+        CommunicationSession session = new CommunicationSession();
+        session.setConsensus(
+                "local-front-desk",
+                "Front desk",
+                "Ask for late checkout",
+                "Up to 500 THB",
+                "Ask before agreeing above 500 THB",
+                true);
+        CrewMateRuntime runtime = new CrewMateRuntime(
+                session, new RecordingModelSession(), noOpRuntimeListener());
+        runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
+
+        runtime.recordUserTranscript("Change the limit to 300 baht.");
+
+        assertFalse(session.consensusReady());
+    }
+
+    @Test
     public void privateTranscriptRoutesUserToMate() {
         CommunicationSession session = new CommunicationSession();
         CrewMateRuntime runtime = new CrewMateRuntime(session, new RecordingModelSession(), noOpRuntimeListener());
