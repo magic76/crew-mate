@@ -212,9 +212,11 @@ public final class GeminiLiveModelSession implements ModelSession {
         AudioOutputMode next = mode == null ? AudioOutputMode.MEDIA : mode;
         if (audioOutputMode == next) return;
         audioOutputMode = next;
-        releasePlayer();
-        applySystemAudioMode();
-        if (running && setupReady && playbackEnabled) ensurePlayer();
+        if (running && setupReady) {
+            releasePlayer();
+            applySystemAudioMode();
+            if (playbackEnabled) ensurePlayer();
+        }
     }
 
     public synchronized void setConversationLanguages(String userValue, String otherValue) {
