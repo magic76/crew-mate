@@ -619,6 +619,19 @@ public class MainActivity extends Activity {
                 : "☎ 通話");
     }
 
+    private void cycleTranscriptDisplayMode() {
+        transcriptDisplayMode = (transcriptDisplayMode + 1) % 3;
+        renderTranscriptModeControl();
+        renderSession(viewedSession);
+    }
+
+    private void renderTranscriptModeControl() {
+        if (transcriptModeButton == null) return;
+        transcriptModeButton.setText(transcriptDisplayMode == 0
+                ? "雙語"
+                : transcriptDisplayMode == 1 ? "譯文" : "原文");
+    }
+
     private void handleLiveCallToggle() {
         if (liveCallState == LiveCallState.ACTIVE || liveCallState == LiveCallState.CONNECTING) {
             if (runtime != null) {
@@ -1223,6 +1236,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("儲存", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         AppConfig.setApiKey(MainActivity.this, api.getText().toString());
+                        translationService = new GeminiTranslationService(AppConfig.getApiKey(MainActivity.this));
                         renderSession(viewedSession);
                     }
                 })
