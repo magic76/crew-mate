@@ -26,6 +26,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
     private volatile boolean externalSpeechObserved;
     private volatile boolean consensusFinalizePending;
+    private volatile boolean finalizeAfterCurrentPrivateTurn;
     private volatile int consensusFinalizeAttempts;
 
     public CrewMateRuntime(ModelSession modelSession, Listener listener) {
@@ -72,6 +73,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public void submitPrivateText(String text) {
         if (closed || session.userDirectControl()) return;
         consensusFinalizePending = false;
+        finalizeAfterCurrentPrivateTurn = false;
         consensusFinalizeAttempts = 0;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
@@ -102,6 +104,15 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         harness.submitText(finalizeInstruction(false));
     }
 
+    public void finalizePrivateSupplementAfterCurrentTurn() {
+        if (closed || session.userDirectControl()) return;
+        finalizeAfterCurrentPrivateTurn = true;
+        session.setConsensusReady(false);
+        session.setStatus(CommunicationSession.Status.THINKING);
+        notifyChanged();
+        emitStatus("Updating context");
+    }
+
     private String finalizeInstruction(boolean retry) {
         String prefix = retry
                 ? "PRODUCT_EVENT=FINALIZE_TASK_CONSENSUS_RETRY\n"
@@ -117,6 +128,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     public void recordUserTranscript(String text) {
         if (closed || session.userDirectControl() || speechAudience != SpeechAudience.PRIVATE_TO_MATE) return;
         consensusFinalizePending = false;
+        finalizeAfterCurrentPrivateTurn = false;
         consensusFinalizeAttempts = 0;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
@@ -163,6 +175,13 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
             case TURN_COMPLETED:
                 if (!closed) {
                     commitModelTurn();
+                    if (finalizeAfterCurrentPrivateTurn) {
+                        finalizeAfterCurrentPrivateTurn = false;
+                        if (!session.consensusReady() && session.pendingUserQuestion().isEmpty()) {
+                            finalizeTaskBrief();
+                            return;
+                        }
+                    }
                     if (consensusFinalizePending) {
                         if (session.consensusReady() || !session.pendingUserQuestion().isEmpty()) {
                             consensusFinalizePending = false;
