@@ -189,10 +189,10 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     @Override
     public void interrupt() {
+        // Product-level interruption (for example USER_DIRECT) must not end the provider's realtime
+        // audio stream. Local audience routing already gates the microphone/playback.
         flushPlayback();
-        if (userAudioEnabled) {
-            try { sendAudioStreamEnd(); } catch (Exception ignored) {}
-        }
+        setSpeaking(false);
     }
 
     @Override
