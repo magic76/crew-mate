@@ -234,3 +234,15 @@ This intentionally favors stable in-person turn taking over barge-in while Mate 
 Payment is not a required field for every task. `payment_preference` and `payment_fallback` stay empty for tasks that do not involve payment, and the UI hides payment rows entirely. The agent must not ask payment questions solely to fill the task consensus.
 
 When payment is relevant, changing away from an explicitly selected payment method remains a consequential decision and must be escalated unless the fallback was already authorized.
+
+
+## Context supplements keep the Live session connected
+
+Second-stage private supplements are audience-routing changes inside the existing Gemini Live websocket.
+
+- `EXTERNAL_WITH_MATE -> PRIVATE_TO_MATE` keeps the same local microphone/player when both modes own live audio.
+- `PRIVATE_TO_MATE -> MATE_HANDLING -> EXTERNAL_WITH_MATE` may stop/restart local capture while Mate updates consensus, but does not send provider `audioStreamEnd`.
+- Product-level interrupt / USER_DIRECT does not send `audioStreamEnd`.
+- `audioStreamEnd` is reserved for closing the whole Gemini Live session.
+
+This prevents a quick private context update from terminating the stage-two realtime conversation.
