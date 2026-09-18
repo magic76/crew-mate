@@ -20,6 +20,8 @@ public final class CommunicationSession {
     private String targetPersonId = "";
     private String goal = "";
     private String outcomeSummary = "";
+    private String userLanguage = "AUTO";
+    private String otherPersonLanguage = "AUTO";
     private boolean userDirectControl;
     private Status status = Status.THINKING;
     private final List<Message> messages = new ArrayList<Message>();
@@ -36,6 +38,8 @@ public final class CommunicationSession {
     public synchronized String targetPersonId() { return targetPersonId; }
     public synchronized String goal() { return goal; }
     public synchronized String outcomeSummary() { return outcomeSummary; }
+    public synchronized String userLanguage() { return userLanguage; }
+    public synchronized String otherPersonLanguage() { return otherPersonLanguage; }
     public synchronized boolean userDirectControl() { return userDirectControl; }
     public synchronized Status status() { return status; }
     public synchronized String pendingUserQuestion() { return pendingUserQuestion; }
@@ -49,6 +53,11 @@ public final class CommunicationSession {
 
     public synchronized void setGoal(String value) { goal = clean(value); touch(); }
     public synchronized void setOutcomeSummary(String value) { outcomeSummary = clean(value); touch(); }
+    public synchronized void setLanguages(String userValue, String otherValue) {
+        userLanguage = language(userValue);
+        otherPersonLanguage = language(otherValue);
+        touch();
+    }
     public synchronized void setUserDirectControl(boolean value) { userDirectControl = value; touch(); }
 
     public synchronized void setStatus(Status value) {
@@ -71,4 +80,8 @@ public final class CommunicationSession {
 
     private void touch() { updatedAt = System.currentTimeMillis(); }
     private static String clean(String value) { return value == null ? "" : value.trim(); }
+    private static String language(String value) {
+        String cleaned = clean(value);
+        return cleaned.isEmpty() ? "AUTO" : cleaned;
+    }
 }
