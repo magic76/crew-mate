@@ -189,10 +189,10 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     @Override
     public void interrupt() {
+        // Product-level interruption (for example USER_DIRECT) must not end the provider's realtime
+        // audio stream. Local audience routing already gates the microphone/playback.
         flushPlayback();
-        if (userAudioEnabled) {
-            try { sendAudioStreamEnd(); } catch (Exception ignored) {}
-        }
+        setSpeaking(false);
     }
 
     @Override
@@ -233,9 +233,16 @@ public final class GeminiLiveModelSession implements ModelSession {
     }
 
     /**
-     * Authoritative physical speech boundary. Every audience transition ends the previous microphone
-     * stream, releases AudioRecord, flushes playback, sends explicit audience context, then
-     * starts a fresh microphone stream only for PRIVATE_TO_MATE or EXTERNAL_WITH_MATE.
+     * Authoritative physical speech boundary.
+     *
+     * Audience changes are local routing changes inside one Gemini Live session. They must not send
+     * audioStreamEnd because that can terminate the provider's current realtime audio stream and make
+     * PRIVATE_TO_MATE supplements disconnect the stage-two conversation.
+     *
+     * PRIVATE_TO_MATE <-> EXTERNAL_WITH_MATE keeps the same AudioRecord/AudioTrack alive and only
+     * changes the semantic audience context. Transitions into non-microphone modes stop local capture
+     * and playback, but the websocket stays connected. audioStreamEnd is reserved for closing the
+     * whole Live session.
      */
     public synchronized void setSpeechAudience(SpeechAudience audience) {
         SpeechAudience next = audience == null ? SpeechAudience.MATE_HANDLING : audience;
@@ -250,21 +257,39 @@ public final class GeminiLiveModelSession implements ModelSession {
         }
 
         boolean previousMic = userAudioEnabled;
-        if (previousMic && running && setupReady) sendAudioStreamEnd();
-        if (previousMic || recording || recorder != null) stopInputAudio();
+        boolean nextMic = next.routesMicrophoneToMate();
+        boolean previousPlayback = playbackEnabled;
+        boolean nextPlayback = next.playsMateVoice();
+
+        // Flush any old Mate playback before changing who the microphone belongs to.
         flushPlayback();
-        releasePlayer();
         setSpeaking(false);
 
         speechAudience = next;
         externalSpeechObserved = false;
-        userAudioEnabled = next.routesMicrophoneToMate();
-        playbackEnabled = next.playsMateVoice();
+        userAudioEnabled = nextMic;
+        playbackEnabled = nextPlayback;
 
         if (running && setupReady) {
+            // Keep local audio devices alive when moving directly between the two microphone-owning
+            // audiences. Only semantic ownership changes.
+            if (previousMic && !nextMic) {
+                stopInputAudio();
+            } else if (!previousMic && nextMic) {
+                startInputAudio();
+            } else if (nextMic && !recording) {
+                startInputAudio();
+            }
+
+            if (previousPlayback && !nextPlayback) {
+                releasePlayer();
+            } else if (!previousPlayback && nextPlayback) {
+                ensurePlayer();
+            } else if (nextPlayback) {
+                ensurePlayer();
+            }
+
             sendClientContextNow();
-            if (playbackEnabled) ensurePlayer();
-            if (userAudioEnabled) startInputAudio();
             status(userAudioEnabled ? "Listening" : "Ready");
         }
     }
