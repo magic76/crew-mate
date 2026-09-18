@@ -9,9 +9,13 @@ User selects their language and the other person's language
     ↓
 User privately briefs Mate by voice or text
     ↓
-Mate identifies the person, goal, constraints, and limits
+Mate builds a visible shared task consensus
     ↓
-User explicitly starts the handoff
+If material details are missing, Mate asks a clarification question
+    ↓
+User answers; Mate updates the same consensus
+    ↓
+Only after the consensus is ready can the user explicitly start the handoff
     ↓
 OTHER_PERSON ↔ MATE live voice conversation
     ↓
@@ -77,7 +81,7 @@ When `EXTERNAL_WITH_MATE` begins, Mate stays silent until the other person actua
 
 `CrewMateAgentSpec` exposes only the tools needed for the in-person flow:
 
-- `find_contact`
+- `update_task_consensus`
 - `request_user_input`
 - `complete_task`
 
@@ -152,3 +156,18 @@ Each task stores two independent language preferences:
 - other-person language
 
 The compact language control uses the form `🌐 user → other person`. Either side can use automatic detection. Language changes are pushed into the active Gemini Live session without recreating the task.
+
+
+## Task consensus
+
+Before Crew Mate can enter the external conversation, the user and Mate must share an explicit task consensus containing:
+
+- target person
+- purpose / desired outcome
+- constraints and limits
+- the boundary for when Mate must return to the user for a decision
+- user and other-person languages
+
+The agent may ask multiple concise clarification questions during the private briefing phase. Target + goal alone are not sufficient to make a task ready when material constraints remain ambiguous.
+
+Any new `PRIVATE_TO_MATE` text or speech immediately invalidates the previous ready state. Mate must update the shared consensus again before the external handoff button is enabled. External speech never modifies private task consensus.
