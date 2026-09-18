@@ -35,10 +35,15 @@ import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
 import com.crewpocket.mate.storage.SessionStore;
 import com.crewpocket.mate.voice.GeminiLiveModelSession;
+import com.crewpocket.mate.voice.GeminiTranslationService;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /** Task-first UI with an explicit speech audience boundary. */
 public class MainActivity extends Activity {
@@ -82,11 +87,13 @@ public class MainActivity extends Activity {
     private Button primaryButton;
     private Button directButton;
     private Button endConversationButton;
+    private Button moreButton;
     private Button settingsButton;
     private LinearLayout callBar;
     private TextView callStateText;
     private Button languageButton;
     private Button audioOutputButton;
+    private Button transcriptModeButton;
     private Button callToggleButton;
     private TextView statusText;
     private TextView taskText;
@@ -111,6 +118,9 @@ public class MainActivity extends Activity {
     private CrewMateRuntime runtime;
     private GeminiLiveModelSession modelSession;
     private SessionStore sessionStore;
+    private GeminiTranslationService translationService;
+    private final Set<String> translationInFlight = new HashSet<String>();
+    private final Set<String> translationAttempted = new HashSet<String>();
     private CommunicationSession viewedSession;
     private LiveCallState liveCallState = LiveCallState.OFF;
     private SpeechAudience speechAudience = SpeechAudience.IDLE;
@@ -123,6 +133,8 @@ public class MainActivity extends Activity {
     private String selectedUserLanguage = "AUTO";
     private String selectedOtherLanguage = "AUTO";
     private AudioOutputMode audioOutputMode = AudioOutputMode.MEDIA;
+    // 0 = bilingual, 1 = translated/user language, 2 = original.
+    private int transcriptDisplayMode;
     private boolean oneShotPrivateSupplement;
 
     @Override
@@ -131,6 +143,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         sessionStore = new SessionStore(this);
+        translationService = new GeminiTranslationService(AppConfig.getApiKey(this));
         selectedUserLanguage = defaultUserLanguage();
         audioOutputMode = AppConfig.getAudioOutputMode(this);
         setContentView(buildUi());
@@ -281,6 +294,15 @@ public class MainActivity extends Activity {
         outputLp.setMargins(0, 0, dp(6), 0);
         callBar.addView(audioOutputButton, outputLp);
 
+        transcriptModeButton = actionButton("雙語", surface2);
+        transcriptModeButton.setTextSize(10);
+        transcriptModeButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { cycleTranscriptDisplayMode(); }
+        });
+        LinearLayout.LayoutParams transcriptLp = new LinearLayout.LayoutParams(dp(64), dp(38));
+        transcriptLp.setMargins(0, 0, dp(6), 0);
+        callBar.addView(transcriptModeButton, transcriptLp);
+
         callToggleButton = actionButton("開啟", surface2);
         callToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { handleLiveCallToggle(); }
@@ -292,6 +314,7 @@ public class MainActivity extends Activity {
         root.addView(callBar, callLp);
         renderLanguageControl();
         renderAudioOutputControl();
+        renderTranscriptModeControl();
         renderLiveCallControl();
 
         statusText = new TextView(this);
@@ -405,14 +428,23 @@ public class MainActivity extends Activity {
         directLp.setMargins(dp(8), 0, 0, 0);
         modeActions.addView(directButton, directLp);
 
-        endConversationButton = actionButton("結束", Color.rgb(127, 29, 29));
-        endConversationButton.setTextSize(12);
+        endConversationButton = actionButton("完成任務", Color.rgb(5, 150, 105));
+        endConversationButton.setTextSize(11);
         endConversationButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showEndTaskOptions(); }
+            @Override public void onClick(View v) { confirmCompleteTask(); }
         });
-        LinearLayout.LayoutParams endLp = new LinearLayout.LayoutParams(0, dp(52), 0.72f);
+        LinearLayout.LayoutParams endLp = new LinearLayout.LayoutParams(0, dp(52), 0.92f);
         endLp.setMargins(dp(8), 0, 0, 0);
         modeActions.addView(endConversationButton, endLp);
+
+        moreButton = actionButton("⋯", surface2);
+        moreButton.setTextSize(16);
+        moreButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showEndTaskOptions(); }
+        });
+        LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(dp(48), dp(52));
+        moreLp.setMargins(dp(8), 0, 0, 0);
+        modeActions.addView(moreButton, moreLp);
         root.addView(modeActions);
 
         utilities = new LinearLayout(this);
@@ -515,6 +547,7 @@ public class MainActivity extends Activity {
     }
 
     private void applySelectedLanguages() {
+        synchronized (translationAttempted) { translationAttempted.clear(); }
         if (viewedSession != null) {
             viewedSession.setLanguages(selectedUserLanguage, selectedOtherLanguage);
             sessionStore.save(viewedSession);
@@ -587,6 +620,19 @@ public class MainActivity extends Activity {
         audioOutputButton.setText(audioOutputMode == AudioOutputMode.MEDIA
                 ? "🔊 媒體"
                 : "☎ 通話");
+    }
+
+    private void cycleTranscriptDisplayMode() {
+        transcriptDisplayMode = (transcriptDisplayMode + 1) % 3;
+        renderTranscriptModeControl();
+        renderSession(viewedSession);
+    }
+
+    private void renderTranscriptModeControl() {
+        if (transcriptModeButton == null) return;
+        transcriptModeButton.setText(transcriptDisplayMode == 0
+                ? "雙語"
+                : transcriptDisplayMode == 1 ? "譯文" : "原文");
     }
 
     private void handleLiveCallToggle() {
@@ -1028,20 +1074,29 @@ public class MainActivity extends Activity {
         status("Ready", muted);
     }
 
+    private void confirmCompleteTask() {
+        if (viewedSession == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("完成任務？")
+                .setMessage("確認這次任務已經處理完成。之後會保留完整紀錄，但不會再繼續修改這筆任務。")
+                .setPositiveButton("完成任務", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        completeTaskByUser();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private void showEndTaskOptions() {
         if (viewedSession == null) {
             if (runtime != null) stopRuntime();
             return;
         }
         new AlertDialog.Builder(this)
-                .setTitle("結束這次對話")
-                .setMessage("「任務已完成」會把這次任務標記為完成；「只結束 AI 通話」只會停止 Live 連線，任務仍可之後繼續。")
-                .setPositiveButton("任務已完成", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        completeTaskByUser();
-                    }
-                })
-                .setNeutralButton("只結束 AI 通話", new DialogInterface.OnClickListener() {
+                .setTitle("通話選項")
+                .setMessage("只停止 Gemini Live 連線，不會把任務標記為完成。之後可以從「紀錄」繼續。")
+                .setPositiveButton("只結束 AI 通話", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         stopRuntime();
                     }
@@ -1068,41 +1123,131 @@ public class MainActivity extends Activity {
             speechAudience = SpeechAudience.IDLE;
             renderSession(session);
         }
-        Toast.makeText(this, "任務已標記完成", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "任務已完成並保留在紀錄", Toast.LENGTH_SHORT).show();
     }
 
     private void showHistory() {
         if (viewedSession != null) sessionStore.save(viewedSession);
         final List<CommunicationSession> sessions = sessionStore.loadAll();
         if (sessions.isEmpty()) {
-            Toast.makeText(this, "目前還沒有溝通紀錄。", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "目前還沒有任務紀錄。", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        String[] labels = new String[sessions.size()];
-        for (int i = 0; i < sessions.size(); i++) {
-            CommunicationSession session = sessions.get(i);
-            String person = session.targetPerson().isEmpty() ? "未指定對象" : session.targetPerson();
-            String goal = session.goal().isEmpty() ? "尚未確認目標" : session.goal();
-            labels[i] = person + " · " + goal + " · " + historyStatus(session);
-        }
+        final LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(8));
+        sheet.setBackground(roundRect(surface, 18));
 
-        new AlertDialog.Builder(this)
-                .setTitle("任務紀錄")
-                .setItems(labels, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        showHistoryDetails(sessions.get(which));
-                    }
-                })
+        TextView title = new TextView(this);
+        title.setText("任務紀錄");
+        title.setTextColor(text);
+        title.setTextSize(21);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        sheet.addView(title);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("點進任務可查看完整對話；未完成任務可以直接繼續。");
+        subtitle.setTextColor(muted);
+        subtitle.setTextSize(11);
+        subtitle.setPadding(0, dp(4), 0, dp(10));
+        sheet.addView(subtitle);
+
+        final LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        final ScrollView scroll = new ScrollView(this);
+        scroll.addView(list);
+        sheet.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(500)));
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(sheet)
                 .setNegativeButton("關閉", null)
-                .show();
+                .create();
+
+        for (final CommunicationSession session : sessions) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(14), dp(12), dp(14), dp(12));
+            card.setBackground(roundRect(surface2, 14));
+
+            LinearLayout header = new LinearLayout(this);
+            header.setOrientation(LinearLayout.HORIZONTAL);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView person = new TextView(this);
+            person.setText(session.targetPerson().isEmpty() ? "未指定對象" : session.targetPerson());
+            person.setTextColor(text);
+            person.setTextSize(15);
+            person.setTypeface(Typeface.DEFAULT_BOLD);
+            header.addView(person, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView state = new TextView(this);
+            state.setText(historyStatus(session));
+            state.setTextSize(10);
+            state.setTypeface(Typeface.DEFAULT_BOLD);
+            state.setTextColor(session.status() == CommunicationSession.Status.COMPLETED ? green
+                    : session.status() == CommunicationSession.Status.NEEDS_USER_INPUT ? amber : muted);
+            state.setPadding(dp(8), dp(4), dp(8), dp(4));
+            state.setBackground(roundRect(surface, 9));
+            header.addView(state);
+            card.addView(header);
+
+            TextView goal = new TextView(this);
+            goal.setText(session.goal().isEmpty() ? "尚未確認任務目的" : session.goal());
+            goal.setTextColor(text);
+            goal.setTextSize(13);
+            goal.setPadding(0, dp(7), 0, 0);
+            card.addView(goal);
+
+            if (!session.outcomeSummary().isEmpty()) {
+                TextView outcome = new TextView(this);
+                outcome.setText("結果：" + session.outcomeSummary());
+                outcome.setTextColor(muted);
+                outcome.setTextSize(11);
+                outcome.setPadding(0, dp(6), 0, 0);
+                card.addView(outcome);
+            }
+
+            TextView meta = new TextView(this);
+            meta.setText(formatHistoryTime(session.updatedAt())
+                    + "  ·  " + languageShortLabel(session.userLanguage())
+                    + " → " + languageShortLabel(session.otherPersonLanguage()));
+            meta.setTextColor(muted);
+            meta.setTextSize(10);
+            meta.setPadding(0, dp(8), 0, 0);
+            card.addView(meta);
+
+            TextView action = new TextView(this);
+            action.setText(session.status() == CommunicationSession.Status.COMPLETED
+                    ? "查看詳情  ›"
+                    : "查看／繼續任務  ›");
+            action.setTextColor(accent);
+            action.setTextSize(11);
+            action.setTypeface(Typeface.DEFAULT_BOLD);
+            action.setPadding(0, dp(8), 0, 0);
+            card.addView(action);
+
+            card.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    dialog.dismiss();
+                    showHistoryDetails(session);
+                }
+            });
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, dp(5), 0, dp(7));
+            list.addView(card, lp);
+        }
+        dialog.show();
     }
 
     private String historyStatus(CommunicationSession session) {
         if (session == null) return "未知";
         switch (session.status()) {
             case COMPLETED:
-                return "USER".equals(session.completionSource()) ? "已完成（你確認）" : "已完成";
+                return "USER".equals(session.completionSource()) ? "已完成 · 你確認" : "已完成";
             case NEEDS_USER_INPUT:
                 return "等待你決定";
             case ERROR:
@@ -1118,54 +1263,256 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void showHistoryDetails(CommunicationSession session) {
+    private String formatHistoryTime(long timestamp) {
+        try {
+            return new SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(new Date(timestamp));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private void showHistoryDetails(final CommunicationSession session) {
         if (session == null) return;
-        StringBuilder body = new StringBuilder();
-        body.append("狀態：").append(historyStatus(session));
-        if (!session.targetPerson().isEmpty()) body.append("\n對象：").append(session.targetPerson());
-        if (!session.goal().isEmpty()) body.append("\n目的：").append(session.goal());
-        if (!session.constraints().isEmpty()) body.append("\n限制／條件：").append(session.constraints());
+        ensureSessionTranslations(session);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(4), dp(4), dp(4), dp(10));
+
+        TextView state = new TextView(this);
+        state.setText(historyStatus(session) + "  ·  " + formatHistoryTime(session.updatedAt()));
+        state.setTextColor(session.status() == CommunicationSession.Status.COMPLETED ? green : amber);
+        state.setTypeface(Typeface.DEFAULT_BOLD);
+        state.setTextSize(12);
+        content.addView(state);
+
+        addHistorySection(content, "任務", session.goal().isEmpty() ? "尚未確認目的" : session.goal());
+        if (!session.constraints().isEmpty()) addHistorySection(content, "限制／條件", session.constraints());
         if (!session.escalationBoundary().isEmpty()) {
-            body.append("\n需要回來問你：").append(session.escalationBoundary());
+            addHistorySection(content, "需要回來問你", session.escalationBoundary());
         }
         if (!session.paymentPreference().isEmpty()) {
-            body.append("\n付款：").append(session.paymentPreference());
+            String payment = session.paymentPreference();
+            if (!session.paymentFallback().isEmpty()) payment += "\n可接受：" + session.paymentFallback();
+            addHistorySection(content, "付款", payment);
         }
-        if (!session.outcomeSummary().isEmpty()) {
-            body.append("\n結果：").append(session.outcomeSummary());
-        }
+        if (!session.outcomeSummary().isEmpty()) addHistorySection(content, "結果", session.outcomeSummary());
 
-        List<Message> messages = session.messages();
-        if (!messages.isEmpty()) {
-            body.append("\n\n── 對話紀錄 ──");
-            for (Message message : messages) {
-                body.append("\n\n");
-                switch (message.sender) {
-                    case USER:
-                        body.append("你 → Mate");
-                        break;
-                    case MATE:
-                        body.append("Mate");
-                        if (!message.recipient.isEmpty()) body.append(" → ").append(message.recipient);
-                        break;
-                    case OTHER_PERSON:
-                        body.append(session.targetPerson().isEmpty() ? "對方" : session.targetPerson())
-                                .append(" → Mate");
-                        break;
-                    case SYSTEM:
-                    default:
-                        body.append("系統");
-                        break;
+        TextView language = new TextView(this);
+        language.setText("語言  " + languageLabel(session.userLanguage())
+                + " → " + languageLabel(session.otherPersonLanguage()));
+        language.setTextColor(muted);
+        language.setTextSize(11);
+        language.setPadding(0, dp(10), 0, dp(6));
+        content.addView(language);
+
+        if (!session.messages().isEmpty()) {
+            TextView title = new TextView(this);
+            title.setText("對話紀錄");
+            title.setTextColor(text);
+            title.setTextSize(13);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setPadding(0, dp(12), 0, dp(6));
+            content.addView(title);
+
+            for (Message message : session.messages()) {
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.VERTICAL);
+                row.setPadding(dp(10), dp(8), dp(10), dp(8));
+                row.setBackground(roundRect(surface2, 11));
+
+                TextView who = new TextView(this);
+                who.setText(historyMessageLabel(session, message));
+                who.setTextColor(muted);
+                who.setTextSize(9);
+                who.setTypeface(Typeface.DEFAULT_BOLD);
+                row.addView(who);
+
+                boolean external = isExternalMessage(message);
+                String translated = message.translatedText();
+                if (external && !translated.isEmpty() && !translated.equals(message.content())) {
+                    TextView translatedView = new TextView(this);
+                    translatedView.setText(translated);
+                    translatedView.setTextColor(text);
+                    translatedView.setTextSize(13);
+                    translatedView.setPadding(0, dp(4), 0, dp(4));
+                    row.addView(translatedView);
+
+                    TextView original = new TextView(this);
+                    original.setText(message.content());
+                    original.setTextColor(muted);
+                    original.setTextSize(11);
+                    row.addView(original);
+                } else {
+                    TextView body = new TextView(this);
+                    body.setText(message.content());
+                    body.setTextColor(text);
+                    body.setTextSize(12);
+                    body.setPadding(0, dp(4), 0, 0);
+                    row.addView(body);
                 }
-                body.append("\n").append(message.content());
+
+                LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rowLp.setMargins(0, dp(3), 0, dp(5));
+                content.addView(row, rowLp);
             }
         }
 
-        new AlertDialog.Builder(this)
-                .setTitle(session.targetPerson().isEmpty() ? "任務紀錄" : session.targetPerson())
-                .setMessage(body.toString())
-                .setPositiveButton("關閉", null)
-                .show();
+        ScrollView scroll = new ScrollView(this);
+        scroll.setPadding(dp(12), 0, dp(12), 0);
+        scroll.addView(content);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(session.targetPerson().isEmpty() ? "任務詳情" : session.targetPerson())
+                .setView(scroll)
+                .setNegativeButton("關閉", null);
+
+        if (session.status() == CommunicationSession.Status.COMPLETED) {
+            builder.setPositiveButton("以此建立新任務", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    requestCloneHistoricalTask(session);
+                }
+            });
+        } else {
+            builder.setPositiveButton("繼續此任務", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    resumeHistoricalSession(session);
+                }
+            });
+        }
+        builder.show();
+    }
+
+    private void addHistorySection(LinearLayout container, String label, String value) {
+        if (value == null || value.trim().isEmpty()) return;
+        TextView labelView = new TextView(this);
+        labelView.setText(label);
+        labelView.setTextColor(muted);
+        labelView.setTextSize(10);
+        labelView.setTypeface(Typeface.DEFAULT_BOLD);
+        labelView.setPadding(0, dp(11), 0, dp(3));
+        container.addView(labelView);
+
+        TextView valueView = new TextView(this);
+        valueView.setText(value);
+        valueView.setTextColor(text);
+        valueView.setTextSize(13);
+        valueView.setLineSpacing(0, 1.15f);
+        container.addView(valueView);
+    }
+
+    private String historyMessageLabel(CommunicationSession session, Message message) {
+        if (message.sender == Message.Sender.USER) return "你 → Mate";
+        if (message.sender == Message.Sender.OTHER_PERSON) {
+            return (session.targetPerson().isEmpty() ? "對方" : session.targetPerson()) + " → Mate";
+        }
+        if (message.sender == Message.Sender.MATE) {
+            return "USER".equals(message.recipient) ? "Mate → 你" : "Mate → " + message.recipient;
+        }
+        return "系統";
+    }
+
+    private void resumeHistoricalSession(final CommunicationSession selected) {
+        if (selected == null || selected.status() == CommunicationSession.Status.COMPLETED) return;
+        if (runtime != null && viewedSession != null
+                && viewedSession.sessionId.equals(selected.sessionId)) {
+            Toast.makeText(this, "這就是目前正在進行的任務", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (runtime != null && viewedSession != null
+                && !viewedSession.sessionId.equals(selected.sessionId)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("切換任務？")
+                    .setMessage("目前任務會保留在紀錄中，AI 通話會先停止，再切換到這筆任務。")
+                    .setPositiveButton("切換並繼續", new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface dialog, int which) {
+                            activateHistoricalSession(selected.sessionId);
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        activateHistoricalSession(selected.sessionId);
+    }
+
+    private void activateHistoricalSession(String sessionId) {
+        if (runtime != null) stopRuntime();
+        CommunicationSession session = sessionStore.loadById(sessionId);
+        if (session == null || session.status() == CommunicationSession.Status.COMPLETED) return;
+
+        viewedSession = session;
+        viewedSession.setUserDirectControl(false);
+        selectedUserLanguage = viewedSession.userLanguage();
+        selectedOtherLanguage = viewedSession.otherPersonLanguage();
+        oneShotPrivateSupplement = false;
+        boolean external = hasExternalMessages(viewedSession);
+        privateReturnAudience = external ? SpeechAudience.EXTERNAL_WITH_MATE : SpeechAudience.MATE_HANDLING;
+        speechAudience = SpeechAudience.MATE_HANDLING;
+
+        if (viewedSession.status() == CommunicationSession.Status.STOPPED
+                || viewedSession.status() == CommunicationSession.Status.ERROR) {
+            viewedSession.setStatus(CommunicationSession.Status.THINKING);
+            sessionStore.save(viewedSession);
+        }
+
+        renderLanguageControl();
+        renderSession(viewedSession);
+
+        if (viewedSession.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                || !viewedSession.consensusReady()) {
+            ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
+        } else if (external) {
+            ensureRuntime(SpeechAudience.EXTERNAL_WITH_MATE);
+        } else {
+            status("Consensus ready", green);
+        }
+    }
+
+    private void requestCloneHistoricalTask(final CommunicationSession source) {
+        if (source == null) return;
+        if (runtime != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("建立新任務？")
+                    .setMessage("目前 AI 通話會停止，新的任務會沿用這筆紀錄的目標與限制，並重新跟你確認。")
+                    .setPositiveButton("建立", new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface dialog, int which) {
+                            cloneHistoricalTask(source);
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        cloneHistoricalTask(source);
+    }
+
+    private void cloneHistoricalTask(CommunicationSession source) {
+        if (runtime != null) stopRuntime();
+        CommunicationSession fresh = new CommunicationSession();
+        fresh.setConsensus(
+                source.targetPersonId(),
+                source.targetPerson(),
+                source.goal(),
+                source.constraints(),
+                source.escalationBoundary(),
+                source.paymentPreference(),
+                source.paymentFallback(),
+                false);
+        fresh.setLanguages(source.userLanguage(), source.otherPersonLanguage());
+        fresh.setStatus(CommunicationSession.Status.THINKING);
+        sessionStore.save(fresh);
+
+        viewedSession = fresh;
+        selectedUserLanguage = fresh.userLanguage();
+        selectedOtherLanguage = fresh.otherPersonLanguage();
+        speechAudience = SpeechAudience.MATE_HANDLING;
+        privateReturnAudience = SpeechAudience.MATE_HANDLING;
+        oneShotPrivateSupplement = false;
+        renderLanguageControl();
+        renderSession(fresh);
+        Toast.makeText(this, "已建立新任務，請先重新確認需求", Toast.LENGTH_SHORT).show();
     }
 
     private void showSettings() {
@@ -1193,6 +1540,8 @@ public class MainActivity extends Activity {
                 .setPositiveButton("儲存", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         AppConfig.setApiKey(MainActivity.this, api.getText().toString());
+                        translationService = new GeminiTranslationService(AppConfig.getApiKey(MainActivity.this));
+                        synchronized (translationAttempted) { translationAttempted.clear(); }
                         renderSession(viewedSession);
                     }
                 })
@@ -1258,8 +1607,10 @@ public class MainActivity extends Activity {
 
             // During stage 2 keep only the call state + end action in the top bar.
             languageButton.setVisibility(stageTwo ? View.GONE : View.VISIBLE);
+            transcriptModeButton.setVisibility(stageTwo ? View.VISIBLE : View.GONE);
             audioOutputButton.setVisibility(View.VISIBLE);
         } else {
+            transcriptModeButton.setVisibility(publicConversation ? View.VISIBLE : View.GONE);
             statusText.setVisibility(active ? View.VISIBLE : View.GONE);
             externalSectionTitle.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
             externalScroll.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
@@ -1283,6 +1634,7 @@ public class MainActivity extends Activity {
             audienceCard.setVisibility(View.GONE);
             modeActions.setVisibility(View.GONE);
             utilities.setVisibility(View.GONE);
+            transcriptModeButton.setVisibility(View.GONE);
             renderAudience(null);
             renderControls(null);
             return;
@@ -1346,7 +1698,7 @@ public class MainActivity extends Activity {
         taskText.setText(task.toString());
         taskText.setVisibility(View.VISIBLE);
         externalSectionTitle.setText(inPerson
-                ? "即時對話"
+                ? "即時對話 · " + (transcriptDisplayMode == 0 ? "雙語" : transcriptDisplayMode == 1 ? "譯文" : "原文")
                 : "對外紀錄 · Mate ↔ " + person);
         privateSectionTitle.setText("🔒 私人 · 你 ↔ Mate");
         renderTimelines(session, person);
@@ -1407,6 +1759,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
             composerLabel.setText("先告訴 Mate 你想做什麼");
             taskVoiceButton.setText("🎙  口頭交代");
             taskInputButton.setText("交代給 Mate");
@@ -1418,6 +1771,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
             return;
         }
 
@@ -1426,6 +1780,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.VISIBLE);
+            moreButton.setVisibility(View.VISIBLE);
             return;
         }
 
@@ -1435,6 +1790,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
             composerLabel.setText(supplement
                     ? "補充 context 給 Mate"
                     : "把需求交代給 Mate");
@@ -1460,6 +1816,7 @@ public class MainActivity extends Activity {
             directButton.setText("我要自己說");
             directButton.setBackground(roundRect(direct, 11));
             endConversationButton.setVisibility(View.VISIBLE);
+            moreButton.setVisibility(View.VISIBLE);
             return;
         }
 
@@ -1467,6 +1824,7 @@ public class MainActivity extends Activity {
             primaryButton.setText("回答 Mate 的問題");
             primaryButton.setBackground(roundRect(accent, 11));
             endConversationButton.setVisibility(hasExternalMessages(session) ? View.VISIBLE : View.GONE);
+            moreButton.setVisibility(hasExternalMessages(session) ? View.VISIBLE : View.GONE);
         } else if (isInPersonMode() && taskReady(session)) {
             String person = session.targetPerson().isEmpty() ? "對方" : session.targetPerson();
             primaryButton.setText("第 2 步 · 讓 Mate 跟 " + person + " 說");
@@ -1479,6 +1837,7 @@ public class MainActivity extends Activity {
         boolean canSupplement = isInPersonMode() && taskReady(session);
         if (session.status() != CommunicationSession.Status.NEEDS_USER_INPUT) {
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
         }
         directButton.setVisibility(canSupplement ? View.VISIBLE : View.GONE);
         directButton.setText(publicConversationActive() ? "我要自己說" : "補充 context");
@@ -1521,12 +1880,12 @@ public class MainActivity extends Activity {
         int externalCount = 0;
         int privateCount = 0;
         for (Message message : session.messages()) {
-            boolean external = message.sender == Message.Sender.OTHER_PERSON
-                    || (message.sender == Message.Sender.MATE && !"USER".equals(message.recipient));
+            boolean external = isExternalMessage(message);
             if (external) {
+                ensureMessageTranslation(session, message);
                 boolean mate = message.sender == Message.Sender.MATE;
                 String label = mate ? "Mate → " + person : person + " → Mate";
-                addBubble(externalTimeline, label, message.content(), mate, false);
+                addExternalBubble(externalTimeline, label, message, mate);
                 externalCount++;
             } else if (message.sender == Message.Sender.USER || message.sender == Message.Sender.MATE) {
                 boolean user = message.sender == Message.Sender.USER;
@@ -1543,6 +1902,168 @@ public class MainActivity extends Activity {
         }
         if (followExternal) scrollToBottom(externalScroll);
         if (followPrivate) scrollToBottom(privateScroll);
+    }
+
+    private boolean isExternalMessage(Message message) {
+        return message != null && (message.sender == Message.Sender.OTHER_PERSON
+                || (message.sender == Message.Sender.MATE && !"USER".equals(message.recipient)));
+    }
+
+    private String effectiveUserLanguage(CommunicationSession session) {
+        String language = session == null ? selectedUserLanguage : session.userLanguage();
+        if (language == null || language.trim().isEmpty() || "AUTO".equalsIgnoreCase(language)) {
+            return defaultUserLanguage();
+        }
+        return language;
+    }
+
+    private void ensureSessionTranslations(CommunicationSession session) {
+        if (session == null) return;
+        for (Message message : session.messages()) {
+            if (isExternalMessage(message)) ensureMessageTranslation(session, message);
+        }
+    }
+
+    private void ensureMessageTranslation(final CommunicationSession session, final Message message) {
+        if (session == null || message == null || !isExternalMessage(message)) return;
+        final String targetLanguage = effectiveUserLanguage(session);
+        String sourceLanguage = message.originalLanguage().isEmpty()
+                ? session.otherPersonLanguage()
+                : message.originalLanguage();
+        if (sourceLanguage == null || sourceLanguage.trim().isEmpty()) sourceLanguage = "AUTO";
+        final String source = sourceLanguage;
+
+        if (!message.translatedText().isEmpty()
+                && targetLanguage.equalsIgnoreCase(message.translatedLanguage())) return;
+
+        if (!"AUTO".equalsIgnoreCase(source) && source.equalsIgnoreCase(targetLanguage)) {
+            message.setTranslation(message.content(), source, targetLanguage);
+            sessionStore.save(session);
+            return;
+        }
+
+        synchronized (translationAttempted) {
+            if (translationAttempted.contains(message.id)) return;
+            translationAttempted.add(message.id);
+        }
+        synchronized (translationInFlight) {
+            translationInFlight.add(message.id);
+        }
+
+        GeminiTranslationService service = translationService;
+        if (service == null) {
+            synchronized (translationInFlight) { translationInFlight.remove(message.id); }
+            return;
+        }
+
+        service.translate(message.content(), source, targetLanguage, new GeminiTranslationService.Listener() {
+            @Override public void onTranslated(final String translatedText) {
+                synchronized (translationInFlight) { translationInFlight.remove(message.id); }
+                message.setTranslation(translatedText, source, targetLanguage);
+                sessionStore.save(session);
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (viewedSession != null && viewedSession.sessionId.equals(session.sessionId)) {
+                            renderSession(viewedSession);
+                        }
+                    }
+                });
+            }
+
+            @Override public void onError() {
+                synchronized (translationInFlight) { translationInFlight.remove(message.id); }
+            }
+        });
+    }
+
+    private void addExternalBubble(LinearLayout container, String label, Message message, boolean right) {
+        LinearLayout bubble = new LinearLayout(this);
+        bubble.setOrientation(LinearLayout.VERTICAL);
+        bubble.setPadding(dp(12), dp(9), dp(12), dp(10));
+        bubble.setBackground(roundRect(right ? accentSurface : inboundSurface, 14));
+
+        TextView meta = new TextView(this);
+        meta.setText(label);
+        meta.setTextSize(10);
+        meta.setTextColor(muted);
+        meta.setTypeface(Typeface.DEFAULT_BOLD);
+        bubble.addView(meta);
+
+        String original = message.content() == null ? "" : message.content();
+        String translated = message.translatedText() == null ? "" : message.translatedText();
+        boolean hasDistinctTranslation = !translated.isEmpty() && !translated.equals(original);
+
+        if (transcriptDisplayMode == 2) {
+            TextView originalView = new TextView(this);
+            originalView.setText(original);
+            originalView.setTextSize(13);
+            originalView.setTextColor(text);
+            originalView.setLineSpacing(0, 1.16f);
+            originalView.setPadding(0, dp(4), 0, 0);
+            bubble.addView(originalView);
+        } else if (transcriptDisplayMode == 1) {
+            TextView translatedView = new TextView(this);
+            translatedView.setText(hasDistinctTranslation ? translated : original);
+            translatedView.setTextSize(14);
+            translatedView.setTextColor(text);
+            translatedView.setLineSpacing(0, 1.16f);
+            translatedView.setPadding(0, dp(4), 0, 0);
+            bubble.addView(translatedView);
+            if (!hasDistinctTranslation && isTranslationPending(message)) {
+                TextView pending = new TextView(this);
+                pending.setText("翻譯中…");
+                pending.setTextSize(9);
+                pending.setTextColor(muted);
+                pending.setPadding(0, dp(4), 0, 0);
+                bubble.addView(pending);
+            }
+        } else {
+            TextView translatedView = new TextView(this);
+            translatedView.setText(hasDistinctTranslation ? translated : original);
+            translatedView.setTextSize(14);
+            translatedView.setTextColor(text);
+            translatedView.setLineSpacing(0, 1.16f);
+            translatedView.setPadding(0, dp(4), 0, 0);
+            bubble.addView(translatedView);
+
+            if (hasDistinctTranslation) {
+                TextView originalLabel = new TextView(this);
+                originalLabel.setText("原文");
+                originalLabel.setTextSize(9);
+                originalLabel.setTextColor(muted);
+                originalLabel.setTypeface(Typeface.DEFAULT_BOLD);
+                originalLabel.setPadding(0, dp(7), 0, dp(2));
+                bubble.addView(originalLabel);
+
+                TextView originalView = new TextView(this);
+                originalView.setText(original);
+                originalView.setTextSize(11);
+                originalView.setTextColor(muted);
+                originalView.setLineSpacing(0, 1.12f);
+                bubble.addView(originalView);
+            } else if (isTranslationPending(message)) {
+                TextView pending = new TextView(this);
+                pending.setText("翻譯中…");
+                pending.setTextSize(9);
+                pending.setTextColor(muted);
+                pending.setPadding(0, dp(5), 0, 0);
+                bubble.addView(pending);
+            }
+        }
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = right ? Gravity.END : Gravity.START;
+        lp.setMargins(right ? dp(34) : 0, dp(4), right ? 0 : dp(34), dp(5));
+        bubble.setMinimumWidth(dp(130));
+        bubble.setLayoutParams(lp);
+        container.addView(bubble);
+    }
+
+    private boolean isTranslationPending(Message message) {
+        synchronized (translationInFlight) {
+            return message != null && translationInFlight.contains(message.id);
+        }
     }
 
     private void addBubble(LinearLayout container, String label, String content, boolean right, boolean privateBubble) {

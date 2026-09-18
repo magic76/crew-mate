@@ -107,6 +107,9 @@ public final class SessionStore {
             item.put("sender", message.sender.name());
             item.put("recipient", message.recipient);
             item.put("content", message.content());
+            item.put("translated_text", message.translatedText());
+            item.put("original_language", message.originalLanguage());
+            item.put("translated_language", message.translatedLanguage());
             item.put("timestamp", message.timestamp);
             item.put("status", message.status().name());
             messages.put(item);
@@ -144,8 +147,15 @@ public final class SessionStore {
                     Message.Sender sender = enumValue(Message.Sender.class, item.optString("sender"), Message.Sender.SYSTEM);
                     Message.Status status = enumValue(Message.Status.class, item.optString("status"), Message.Status.INFO);
                     session.addMessage(new Message(
-                            item.optString("id"), sender, item.optString("recipient"), item.optString("content"),
-                            item.optLong("timestamp", System.currentTimeMillis()), status));
+                            item.optString("id"),
+                            sender,
+                            item.optString("recipient"),
+                            item.optString("content"),
+                            item.optString("translated_text"),
+                            item.optString("original_language"),
+                            item.optString("translated_language"),
+                            item.optLong("timestamp", System.currentTimeMillis()),
+                            status));
                 }
             }
 
