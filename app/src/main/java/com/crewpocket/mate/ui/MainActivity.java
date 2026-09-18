@@ -1493,6 +1493,64 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void confirmRemoveHistorySession(final CommunicationSession session,
+                                             final AlertDialog sourceDialog) {
+        if (session == null) return;
+        boolean active = viewedSession != null
+                && viewedSession.sessionId.equals(session.sessionId);
+        String message = active
+                ? "這是目前正在使用的任務。移除後會結束 AI 通話並刪除這筆紀錄，且無法復原。"
+                : "移除後這筆任務與對話紀錄都會刪除，且無法復原。";
+
+        new AlertDialog.Builder(this)
+                .setTitle("移除這筆紀錄？")
+                .setMessage(message)
+                .setPositiveButton("移除", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        removeHistorySession(session, sourceDialog);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void removeHistorySession(CommunicationSession session, AlertDialog sourceDialog) {
+        if (session == null) return;
+        boolean active = viewedSession != null
+                && viewedSession.sessionId.equals(session.sessionId);
+
+        if (active && runtime != null) {
+            stopRuntime();
+        }
+
+        boolean removed = sessionStore.deleteById(session.sessionId);
+        if (!removed) {
+            Toast.makeText(this, "無法移除這筆紀錄", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (sourceDialog != null) sourceDialog.dismiss();
+
+        if (active) {
+            viewedSession = null;
+            speechAudience = SpeechAudience.IDLE;
+            privateReturnAudience = SpeechAudience.MATE_HANDLING;
+            oneShotPrivateSupplement = false;
+            pendingTypedBrief = "";
+            setLiveCallState(LiveCallState.OFF);
+            selectedUserLanguage = defaultUserLanguage();
+            selectedOtherLanguage = "AUTO";
+            renderLanguageControl();
+            renderSession(null);
+            status("Ready", muted);
+        }
+
+        Toast.makeText(this, "紀錄已移除", Toast.LENGTH_SHORT).show();
+        if (!sessionStore.loadAll().isEmpty()) {
+            showHistory();
+        }
+    }
+
     private void styleHistoryDialog(AlertDialog dialog) {
         if (dialog == null) return;
         Window window = dialog.getWindow();
