@@ -20,6 +20,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -686,7 +687,18 @@ public class MainActivity extends Activity {
 
     private void setLiveCallState(LiveCallState state) {
         liveCallState = state == null ? LiveCallState.OFF : state;
+        updateKeepScreenOn();
         renderLiveCallControl();
+    }
+
+    private void updateKeepScreenOn() {
+        boolean keepScreenOn = liveCallState == LiveCallState.CONNECTING
+                || liveCallState == LiveCallState.ACTIVE;
+        if (keepScreenOn) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
     }
 
     private void renderLiveCallControl() {
