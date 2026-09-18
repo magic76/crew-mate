@@ -1,6 +1,5 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.InPersonMessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
@@ -17,9 +16,8 @@ public class CrewMateTurnAggregationTest {
     @Test
     public void modelTextDeltasBecomeOnePrivateMessageOnTurnComplete() {
         RecordingModelSession model = new RecordingModelSession();
-        InPersonMessagingBackend backend = new InPersonMessagingBackend();
-        CommunicationSession session = new CommunicationSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, null);
+                CommunicationSession session = new CommunicationSession();
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, null);
         runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
         runtime.start();
 
@@ -38,9 +36,8 @@ public class CrewMateTurnAggregationTest {
     @Test
     public void interruptedModelTurnIsNotPersistedAsHalfMessage() {
         RecordingModelSession model = new RecordingModelSession();
-        InPersonMessagingBackend backend = new InPersonMessagingBackend();
-        CommunicationSession session = new CommunicationSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, null);
+                CommunicationSession session = new CommunicationSession();
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, null);
         runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
         runtime.start();
 
