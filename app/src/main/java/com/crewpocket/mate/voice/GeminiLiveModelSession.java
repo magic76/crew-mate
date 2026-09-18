@@ -69,7 +69,6 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
     private volatile boolean userAudioEnabled;
     private volatile boolean playbackEnabled;
-    private volatile String channelMode = "REMOTE";
     private AudioRecord recorder;
     private AudioTrack player;
     private Thread micThread;
@@ -205,7 +204,7 @@ public final class GeminiLiveModelSession implements ModelSession {
 
     /**
      * Authoritative physical speech boundary. Every audience transition ends the previous microphone
-     * stream, releases AudioRecord, flushes playback, sends explicit audience/channel context, then
+     * stream, releases AudioRecord, flushes playback, sends explicit audience context, then
      * starts a fresh microphone stream only for PRIVATE_TO_MATE or EXTERNAL_WITH_MATE.
      */
     public synchronized void setSpeechAudience(SpeechAudience audience) {
@@ -240,14 +239,8 @@ public final class GeminiLiveModelSession implements ModelSession {
         }
     }
 
-    public synchronized void setChannelMode(String value) {
-        String normalized = value == null ? "" : value.trim().toUpperCase();
-        channelMode = "IN_PERSON".equals(normalized) ? "IN_PERSON" : "REMOTE";
-        if (running && setupReady) sendClientContextNow();
-    }
-
     private String buildAudienceContext() {
-        String prefix = "AUDIENCE_MODE=" + speechAudience.name() + "\nCHANNEL_MODE=" + channelMode + "\n";
+        String prefix = "AUDIENCE_MODE=" + speechAudience.name() + "\n";
         switch (speechAudience) {
             case PRIVATE_TO_MATE:
                 return prefix
@@ -258,10 +251,10 @@ public final class GeminiLiveModelSession implements ModelSession {
                         + "Next microphone speech is the OTHER PERSON speaking directly with Mate in an in-person conversation. "
                         + "WAIT SILENTLY until that person actually speaks into the microphone. Do not simulate, predict, or invent what they might say. "
                         + "Do not treat it as a private user instruction. Only after real external speech is received, respond directly to that person, "
-                        + "keep the user's private goal and constraints active, and do not call remote send_message for spoken replies.";
+                        + "keep the user's private goal and constraints active.";
             case USER_DIRECT:
                 return prefix
-                        + "The user personally took over the human conversation. Do not speak and do not send messages until control returns.";
+                        + "The user personally took over the human conversation. Do not speak until control returns.";
             case MATE_HANDLING:
                 return prefix
                         + "There is no microphone speaker. Continue delegated work only through normal product events/tools when appropriate.";
