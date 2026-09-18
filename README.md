@@ -185,3 +185,22 @@ When the user taps **我交代完了 · 請 Mate 整理**, the runtime sends an 
 If the model finishes without doing either, the runtime retries once. If the retry still produces no terminal consensus state, the product falls back to a visible clarification question instead of leaving the UI stuck indefinitely.
 
 New private context invalidates the prior ready state and uses the same finalize path before handoff or before resuming an external conversation.
+
+
+## Stage-two dialogue UI
+
+Once the user hands the task to Mate, the external conversation becomes the primary screen:
+
+- the large green "Mate is talking" card is hidden during normal live dialogue
+- the full consensus card collapses into a compact header with target, language, goal, and payment preference when relevant
+- the external transcript receives the remaining vertical space
+- bottom controls are reduced to **補充**, **我要自己說**, and **結束**
+- if Mate needs a consequential user decision, a single decision card interrupts the conversation instead of stacking multiple status banners
+
+## Payment decision boundary
+
+Task consensus can store a preferred payment method and any explicitly authorized fallback.
+
+A different payment method is consequential by default. For example, if the user specified **credit card** and the merchant says **cash only**, Mate must call `request_user_input` unless cash was already explicitly authorized as a fallback. Mate must not assume the user has cash or accept a new payment method on the user's behalf.
+
+The same escalation principle applies to deposits, identity documents, materially different prices, timing changes, and substitutions outside the shared consensus.
