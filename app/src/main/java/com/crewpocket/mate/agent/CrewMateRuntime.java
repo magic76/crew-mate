@@ -25,6 +25,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private volatile boolean closed;
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
     private volatile boolean externalSpeechObserved;
+    private volatile boolean consensusFinalizePending;
+    private volatile int consensusFinalizeAttempts;
 
     public CrewMateRuntime(ModelSession modelSession, Listener listener) {
         this(new CommunicationSession(), modelSession, listener);
@@ -69,6 +71,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
 
     public void submitPrivateText(String text) {
         if (closed || session.userDirectControl()) return;
+        consensusFinalizePending = false;
+        consensusFinalizeAttempts = 0;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
@@ -87,8 +91,33 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         notifyChanged();
     }
 
+    public void finalizeTaskBrief() {
+        if (closed || session.userDirectControl()) return;
+        consensusFinalizePending = true;
+        consensusFinalizeAttempts = 1;
+        session.setConsensusReady(false);
+        session.setStatus(CommunicationSession.Status.THINKING);
+        notifyChanged();
+        emitStatus("Finalizing task");
+        harness.submitText(finalizeInstruction(false));
+    }
+
+    private String finalizeInstruction(boolean retry) {
+        String prefix = retry
+                ? "PRODUCT_EVENT=FINALIZE_TASK_CONSENSUS_RETRY\n"
+                : "PRODUCT_EVENT=FINALIZE_TASK_CONSENSUS\n";
+        return prefix
+                + "The user explicitly finished this briefing turn. Do not wait for more speech. "
+                + "Before ending this turn, you MUST update the visible shared task consensus with update_task_consensus. "
+                + "If the task is sufficiently clear, set ready=true. "
+                + "If any material detail is still missing, set ready=false and then call request_user_input with exactly one concise, highest-priority clarification question. "
+                + "Do not finish this turn with prose only.";
+    }
+
     public void recordUserTranscript(String text) {
         if (closed || session.userDirectControl() || speechAudience != SpeechAudience.PRIVATE_TO_MATE) return;
+        consensusFinalizePending = false;
+        consensusFinalizeAttempts = 0;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
         session.addMessage(new Message(Message.Sender.USER, "MATE", value, Message.Status.RECEIVED));
@@ -134,6 +163,25 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
             case TURN_COMPLETED:
                 if (!closed) {
                     commitModelTurn();
+                    if (consensusFinalizePending) {
+                        if (session.consensusReady() || !session.pendingUserQuestion().isEmpty()) {
+                            consensusFinalizePending = false;
+                            consensusFinalizeAttempts = 0;
+                        } else if (consensusFinalizeAttempts < 2) {
+                            consensusFinalizeAttempts++;
+                            emitStatus("Finalizing task");
+                            harness.submitText(finalizeInstruction(true));
+                            return;
+                        } else {
+                            consensusFinalizePending = false;
+                            consensusFinalizeAttempts = 0;
+                            session.setPendingUserQuestion(
+                                    "我還缺一個關鍵資訊。請補充你希望我對誰說、想達成什麼結果，或有哪些不能自行決定的限制。");
+                            session.setConsensusReady(false);
+                            session.setStatus(CommunicationSession.Status.NEEDS_USER_INPUT);
+                            notifyChanged();
+                        }
+                    }
                     emitStatus(displayStatus(session.status()));
                 }
                 break;
