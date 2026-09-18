@@ -48,6 +48,38 @@ public class SpeechAudienceBoundaryTest {
     }
 
     @Test
+    public void finalizeTaskBriefSendsDeterministicProductEvent() {
+        CommunicationSession session = new CommunicationSession();
+        RecordingModelSession model = new RecordingModelSession();
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpRuntimeListener());
+        runtime.start();
+
+        runtime.finalizeTaskBrief();
+
+        assertTrue(model.lastUserText.contains("PRODUCT_EVENT=FINALIZE_TASK_CONSENSUS"));
+        runtime.close();
+    }
+
+    @Test
+    public void finalizeTaskBriefFallsBackToQuestionInsteadOfStalling() {
+        CommunicationSession session = new CommunicationSession();
+        RecordingModelSession model = new RecordingModelSession();
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpRuntimeListener());
+        runtime.start();
+
+        runtime.finalizeTaskBrief();
+        model.emit(ModelEvent.turnCompleted());
+        assertTrue(model.lastUserText.contains("PRODUCT_EVENT=FINALIZE_TASK_CONSENSUS_RETRY"));
+
+        model.emit(ModelEvent.turnCompleted());
+
+        assertEquals(CommunicationSession.Status.NEEDS_USER_INPUT, session.status());
+        assertFalse(session.pendingUserQuestion().isEmpty());
+        assertFalse(session.consensusReady());
+        runtime.close();
+    }
+
+    @Test
     public void privateTextInvalidatesPreviouslyReadyConsensus() {
         CommunicationSession session = new CommunicationSession();
         session.setConsensus(
@@ -219,9 +251,10 @@ public class SpeechAudienceBoundaryTest {
 
     private static final class RecordingModelSession implements ModelSession {
         private Listener listener;
+        private String lastUserText = "";
 
         @Override public void start(SessionConfig config, Listener listener) { this.listener = listener; }
-        @Override public void sendUserText(String text) {}
+        @Override public void sendUserText(String text) { lastUserText = text == null ? "" : text; }
         @Override public void sendUserAudio(byte[] audio) {}
         @Override public void sendToolResult(ToolResult result) {}
         @Override public void interrupt() {}
