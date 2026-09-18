@@ -5,19 +5,17 @@ Crew Mate is a voice-first AI assistant for **in-person communication**. The use
 ## Product flow
 
 ```text
-User privately briefs Mate
+User privately briefs Mate by voice or text
     ↓
-Mate identifies the person and communication goal
+Mate identifies the person, goal, constraints, and limits
     ↓
-User taps "開始幫我談"
-    ↓
-Phone is handed to the other person
-    ↓
-Mate waits for that person to actually speak
+User explicitly starts the handoff
     ↓
 OTHER_PERSON ↔ MATE live voice conversation
     ↓
-Mate asks the user privately only when a new decision is required
+User may tap "補充 context" at any time
+    ↓
+PRIVATE_TO_MATE accepts the new private context, then returns to the conversation
     ↓
 Task completes with a factual outcome
 ```
@@ -65,13 +63,13 @@ CommunicationSession
 
 The physical handoff is explicit:
 
-- `PRIVATE_TO_MATE`: the user is speaking privately to Mate.
-- `EXTERNAL_WITH_MATE`: the other person is speaking to Mate.
+- `PRIVATE_TO_MATE`: the user explicitly opened briefing/context-update mode. Only this mode can add or change private user context.
+- `EXTERNAL_WITH_MATE`: the other person is speaking to Mate. External microphone speech never becomes user context.
 - `MATE_HANDLING`: no microphone speaker is assigned.
 - `USER_DIRECT`: the user has taken over the human conversation; Mate does not listen or speak.
 - `IDLE`: no live conversation is active.
 
-When `EXTERNAL_WITH_MATE` begins, Mate stays silent until the other person actually speaks. Model output produced before real external speech is neither played nor persisted as a conversation turn.
+When `EXTERNAL_WITH_MATE` begins, Mate stays silent until the other person actually speaks. Model output produced before real external speech is neither played nor persisted as a conversation turn. To add constraints or corrections while the conversation is active, the user must explicitly enter `PRIVATE_TO_MATE` through the "補充 context" control.
 
 ## Crew Mate tools
 
