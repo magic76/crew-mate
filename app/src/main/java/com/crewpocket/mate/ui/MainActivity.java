@@ -1134,15 +1134,34 @@ public class MainActivity extends Activity {
             return;
         }
 
+        final LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(8));
+        sheet.setBackground(roundRect(surface, 18));
+
+        TextView title = new TextView(this);
+        title.setText("任務紀錄");
+        title.setTextColor(text);
+        title.setTextSize(21);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        sheet.addView(title);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("點進任務可查看完整對話；未完成任務可以直接繼續。");
+        subtitle.setTextColor(muted);
+        subtitle.setTextSize(11);
+        subtitle.setPadding(0, dp(4), 0, dp(10));
+        sheet.addView(subtitle);
+
         final LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(dp(6), dp(4), dp(6), dp(8));
-
         final ScrollView scroll = new ScrollView(this);
         scroll.addView(list);
+        sheet.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(500)));
+
         final AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("任務紀錄")
-                .setView(scroll)
+                .setView(sheet)
                 .setNegativeButton("關閉", null)
                 .create();
 
@@ -1198,6 +1217,16 @@ public class MainActivity extends Activity {
             meta.setTextSize(10);
             meta.setPadding(0, dp(8), 0, 0);
             card.addView(meta);
+
+            TextView action = new TextView(this);
+            action.setText(session.status() == CommunicationSession.Status.COMPLETED
+                    ? "查看詳情  ›"
+                    : "查看／繼續任務  ›");
+            action.setTextColor(accent);
+            action.setTextSize(11);
+            action.setTypeface(Typeface.DEFAULT_BOLD);
+            action.setPadding(0, dp(8), 0, 0);
+            card.addView(action);
 
             card.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
