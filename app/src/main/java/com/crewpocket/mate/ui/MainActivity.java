@@ -105,6 +105,7 @@ public class MainActivity extends Activity {
     private Button taskInputButton;
     private Button taskVoiceButton;
     private LinearLayout modeActions;
+    private View bottomActionSpacer;
     private LinearLayout utilities;
     private Button newTaskButton;
     private Button historyButton;
@@ -424,8 +425,17 @@ public class MainActivity extends Activity {
         privateLp.setMargins(0, dp(6), 0, dp(10));
         root.addView(privateScroll, privateLp);
 
+        bottomActionSpacer = new View(this);
+        bottomActionSpacer.setVisibility(View.GONE);
+        root.addView(bottomActionSpacer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
         modeActions = new LinearLayout(this);
         modeActions.setOrientation(LinearLayout.HORIZONTAL);
+        modeActions.setGravity(Gravity.BOTTOM | Gravity.CENTER_VERTICAL);
+        modeActions.setClipChildren(false);
+        modeActions.setClipToPadding(false);
+        modeActions.setPadding(0, dp(4), 0, dp(8));
         primaryButton = actionButton("🔒 交代給 Mate", accent);
         primaryButton.setTextSize(13);
         primaryButton.setOnClickListener(new View.OnClickListener() {
@@ -459,7 +469,7 @@ public class MainActivity extends Activity {
         modeActions.addView(moreButton, moreLp);
         LinearLayout.LayoutParams modeLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        modeLp.setMargins(0, 0, 0, dp(8));
+        modeLp.setMargins(0, 0, 0, 0);
         root.addView(modeActions, modeLp);
 
         utilities = new LinearLayout(this);
