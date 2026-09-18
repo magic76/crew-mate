@@ -76,6 +76,7 @@ public final class CrewMateToolRegistry {
                     return;
                 }
                 session.setPendingUserQuestion(question);
+                session.setConsensusReady(false);
                 session.setStatus(CommunicationSession.Status.NEEDS_USER_INPUT);
                 notifyChanged();
                 if (listener != null) listener.onUserInputRequested(session, question, reason);
