@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private TextView taskText;
     private LinearLayout taskComposerCard;
+    private TextView composerLabel;
     private EditText taskInput;
     private Button taskInputButton;
     private Button taskVoiceButton;
@@ -193,11 +194,22 @@ public class MainActivity extends Activity {
         subtitle.setPadding(0, dp(2), 0, 0);
         titleBox.addView(subtitle);
         top.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        newTaskButton = actionButton("＋ 新任務", surface2);
+        newTaskButton.setTextSize(11);
+        newTaskButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { requestNewTask(); }
+        });
+        top.addView(newTaskButton, new LinearLayout.LayoutParams(dp(86), dp(38)));
+
         settingsButton = actionButton("設定", surface2);
+        settingsButton.setTextSize(11);
         settingsButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showSettings(); }
         });
-        top.addView(settingsButton, new LinearLayout.LayoutParams(dp(72), dp(38)));
+        LinearLayout.LayoutParams settingsLp = new LinearLayout.LayoutParams(dp(64), dp(38));
+        settingsLp.setMargins(dp(6), 0, 0, 0);
+        top.addView(settingsButton, settingsLp);
         root.addView(top);
 
         callBar = new LinearLayout(this);
@@ -242,14 +254,14 @@ public class MainActivity extends Activity {
         taskComposerCard.setOrientation(LinearLayout.VERTICAL);
         taskComposerCard.setPadding(dp(14), dp(12), dp(14), dp(12));
         taskComposerCard.setBackground(roundRect(surface, 18));
-        TextView composerLabel = new TextView(this);
-        composerLabel.setText("直接說，或打字");
+        composerLabel = new TextView(this);
+        composerLabel.setText("先告訴 Mate 你想做什麼");
         composerLabel.setTextColor(text);
         composerLabel.setTextSize(16);
         composerLabel.setTypeface(Typeface.DEFAULT_BOLD);
         taskComposerCard.addView(composerLabel);
 
-        taskVoiceButton = actionButton("🎙  說給 Mate 聽", accent);
+        taskVoiceButton = actionButton("🎙  口頭交代", accent);
         taskVoiceButton.setTextSize(14);
         taskVoiceButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { handlePrimaryAction(); }
@@ -259,7 +271,7 @@ public class MainActivity extends Activity {
         taskComposerCard.addView(taskVoiceButton, voiceLp);
 
         taskInput = new EditText(this);
-        taskInput.setHint("例如：幫我問櫃台能不能延後退房，超過 500 泰銖先問我");
+        taskInput.setHint("或直接輸入，例如：幫我問櫃台能不能延後退房，超過 500 泰銖先問我");
         taskInput.setTextColor(text);
         taskInput.setHintTextColor(muted);
         taskInput.setTextSize(13);
@@ -337,18 +349,12 @@ public class MainActivity extends Activity {
 
         utilities = new LinearLayout(this);
         utilities.setOrientation(LinearLayout.HORIZONTAL);
-        newTaskButton = actionButton("新任務", surface2);
-        newTaskButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { startFreshTask(); }
-        });
-        utilities.addView(newTaskButton, new LinearLayout.LayoutParams(0, dp(42), 1f));
-        historyButton = actionButton("紀錄", surface2);
+        historyButton = actionButton("查看紀錄", surface2);
         historyButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showHistory(); }
         });
-        LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
-        historyLp.setMargins(dp(8), 0, 0, 0);
-        utilities.addView(historyButton, historyLp);
+        utilities.addView(historyButton,
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
         LinearLayout.LayoutParams utilitiesLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         utilitiesLp.setMargins(0, dp(8), 0, 0);
         root.addView(utilities, utilitiesLp);
@@ -493,18 +499,18 @@ public class MainActivity extends Activity {
     }
 
     private void enterPrivateSupplement() {
-        if (runtime == null) {
-            ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
-            return;
-        }
         privateReturnAudience = speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                || (isInPersonMode() && viewedSession != null
+                || (viewedSession != null
                 && viewedSession.status() == CommunicationSession.Status.NEEDS_USER_INPUT
                 && !viewedSession.targetPerson().isEmpty())
                 ? SpeechAudience.EXTERNAL_WITH_MATE
                 : SpeechAudience.MATE_HANDLING;
+        if (runtime == null) {
+            ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
+            return;
+        }
         applyAudience(SpeechAudience.PRIVATE_TO_MATE);
-        status("Listening", accent);
+        status("Private context", accent);
     }
 
     private void handToOtherPerson() {
@@ -748,10 +754,30 @@ public class MainActivity extends Activity {
         renderSession(viewedSession);
     }
 
+    private void requestNewTask() {
+        if (viewedSession == null && runtime == null) {
+            startFreshTask();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("開始新任務？")
+                .setMessage("目前任務會保留在紀錄中，AI 通話會結束。")
+                .setPositiveButton("開始新任務", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        startFreshTask();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private void startFreshTask() {
         if (runtime != null) stopRuntime();
         viewedSession = null;
         speechAudience = SpeechAudience.IDLE;
+        privateReturnAudience = SpeechAudience.MATE_HANDLING;
+        pendingTypedBrief = "";
+        if (taskInput != null) taskInput.setText("");
         setLiveCallState(LiveCallState.OFF);
         renderSession(null);
         status("Ready", muted);
@@ -876,10 +902,12 @@ public class MainActivity extends Activity {
 
         if (!active) {
             taskText.setVisibility(View.VISIBLE);
-            taskText.setText("你想讓 Mate 幫你處理什麼？\n\n跟誰說、想要什麼結果，有限制就一起講。");
+            taskText.setText("你想讓 Mate 幫你做什麼？\n\n先把對象、想要的結果和限制交代給 Mate。");
             taskText.setTextSize(20);
-            taskInputButton.setText("送出文字");
-            taskVoiceButton.setText("🎙  說給 Mate 聽");
+            composerLabel.setText("先告訴 Mate 你想做什麼");
+            taskInput.setHint("或直接輸入你的需求");
+            taskInputButton.setText("交代給 Mate");
+            taskVoiceButton.setText("🎙  口頭交代");
             audienceCard.setVisibility(View.GONE);
             modeActions.setVisibility(View.GONE);
             utilities.setVisibility(View.GONE);
@@ -938,15 +966,15 @@ public class MainActivity extends Activity {
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             styleAudience(Color.rgb(40, 35, 86), accent);
             audienceTitle.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    ? "🔒 私下補充給 Mate"
-                    : "🎙 正在記錄你的任務");
-            audienceDetail.setText("現在只有 Mate 在聽。說完按「"
-                    + (privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE ? "完成補充" : "我說完了")
-                    + "」。");
+                    ? "🔒 補充 context 給 Mate"
+                    : "🎙 你正在交代需求");
+            audienceDetail.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    ? "現在只有 Mate 在聽。這段會加入你的私人 context，不會直接說給對方。"
+                    : "現在只有 Mate 在聽。把你想做的事、對象和限制說清楚即可。");
         } else if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             styleAudience(Color.rgb(18, 56, 48), green);
-            audienceTitle.setText("第 2 步 · Mate 正在替你跟 " + person + " 說");
-            audienceDetail.setText("把手機交給對方即可。現在麥克風裡說話的人會被視為對方，不是你。");
+            audienceTitle.setText("Mate 正在跟 " + person + " 對話");
+            audienceDetail.setText("現在麥克風是給對方說話。若你要新增條件或資訊，請先按「補充 context」。");
         } else if (speechAudience == SpeechAudience.USER_DIRECT) {
             styleAudience(Color.rgb(83, 45, 20), direct);
             audienceTitle.setText("你已接手對話");
@@ -954,8 +982,8 @@ public class MainActivity extends Activity {
         } else if (speechAudience == SpeechAudience.MATE_HANDLING) {
             if (isInPersonMode() && taskReady(session)) {
                 styleAudience(Color.rgb(18, 56, 48), green);
-                audienceTitle.setText("✓ 任務已準備好");
-                audienceDetail.setText("確認上面的任務內容後，按「開始幫我談」。");
+                audienceTitle.setText("✓ Mate 已理解");
+                audienceDetail.setText("確認內容後，讓 Mate 直接跟對方說。之後仍可隨時補充 context。");
             } else {
                 styleAudience(surface2, muted);
                 audienceTitle.setText("Mate 正在整理任務");
@@ -979,8 +1007,9 @@ public class MainActivity extends Activity {
             primaryButton.setText("開始");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
-            taskVoiceButton.setText("🎙  說給 Mate 聽");
-            taskInputButton.setText("送出文字");
+            composerLabel.setText("先告訴 Mate 你想做什麼");
+            taskVoiceButton.setText("🎙  口頭交代");
+            taskInputButton.setText("交代給 Mate");
             return;
         }
 
@@ -999,16 +1028,21 @@ public class MainActivity extends Activity {
         }
 
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
-            primaryButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    ? "完成補充"
-                    : "我說完了");
+            boolean supplement = privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE;
+            primaryButton.setText(supplement ? "完成補充，回到對話" : "交代完成");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
-            taskVoiceButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    ? "✓  完成補充"
-                    : "✓  我說完了");
-            taskInputButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    ? "送出文字補充"
+            composerLabel.setText(supplement
+                    ? "補充 context 給 Mate"
+                    : "把需求交代給 Mate");
+            taskInput.setHint(supplement
+                    ? "輸入你要新增的條件或資訊"
+                    : "也可以繼續輸入補充內容");
+            taskVoiceButton.setText(supplement
+                    ? "✓  補充完畢，回到對話"
+                    : "✓  我交代完了");
+            taskInputButton.setText(supplement
+                    ? "送出 context 並回到對話"
                     : "送出文字");
             return;
         }
@@ -1017,7 +1051,7 @@ public class MainActivity extends Activity {
         taskInputButton.setText("送出文字");
 
         if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
-            primaryButton.setText("🔒 補充給 Mate");
+            primaryButton.setText("＋ 補充 context");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.VISIBLE);
             directButton.setText("我要自己說");
@@ -1029,7 +1063,8 @@ public class MainActivity extends Activity {
             primaryButton.setText("回答 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
         } else if (isInPersonMode() && taskReady(session)) {
-            primaryButton.setText("開始幫我談");
+            String person = session.targetPerson().isEmpty() ? "對方" : session.targetPerson();
+            primaryButton.setText("讓 Mate 跟 " + person + " 說");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else {
             primaryButton.setText("繼續");
@@ -1038,7 +1073,7 @@ public class MainActivity extends Activity {
 
         boolean canSupplement = isInPersonMode() && taskReady(session);
         directButton.setVisibility(canSupplement ? View.VISIBLE : View.GONE);
-        directButton.setText(publicConversationActive() ? "我要自己說" : "修改任務");
+        directButton.setText(publicConversationActive() ? "我要自己說" : "補充 context");
         directButton.setBackground(roundRect(publicConversationActive() ? direct : surface2, 11));
     }
 
