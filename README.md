@@ -246,3 +246,18 @@ Second-stage private supplements are audience-routing changes inside the existin
 - `audioStreamEnd` is reserved for closing the whole Gemini Live session.
 
 This prevents a quick private context update from terminating the stage-two realtime conversation.
+
+
+## One-shot private supplements
+
+During stage two, tapping **補充** now starts a one-shot private context capture instead of a persistent private mode.
+
+- the UI clearly shows that Mate is privately listening
+- after the user stops speaking for about 1.4 seconds, the private transcript is committed
+- Crew Mate switches to local handling and lets the current Gemini audio turn finish
+- if the model already updates consensus, the app resumes the external conversation immediately
+- otherwise the runtime forces a consensus finalize after that turn
+- if clarification is needed, the conversation pauses for the user's decision instead of silently resuming
+- once consensus is ready, the app automatically returns to `EXTERNAL_WITH_MATE`
+
+The top call indicator distinguishes **AI 通話中**, **私下補充中**, and **Mate 正在更新補充** so websocket connectivity is not confused with conversational state.
