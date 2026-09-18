@@ -286,3 +286,50 @@ Task completion is distinct from stopping Live audio:
 - Tapping **結束** lets the user choose **任務已完成** or **只結束 AI 通話**.
 - **任務已完成** marks the task `COMPLETED` with completion source `USER`.
 - **只結束 AI 通話** closes the Live connection but leaves the task resumable / stopped rather than claiming success.
+
+
+## Resumable task history
+
+The top-bar **紀錄** entry now opens a card-based task history instead of a plain string list.
+
+Each card shows:
+- status
+- target
+- goal
+- latest outcome when available
+- updated time
+- user / other-person languages
+
+Opening a task shows structured task details and its transcript.
+
+- unfinished / stopped / waiting tasks expose **繼續此任務**
+- resuming restores that exact `CommunicationSession` and reconnects to the appropriate stage
+- completed tasks remain immutable and expose **以此建立新任務** instead of reopening the completed record
+- selecting the already-active task does not reconnect the current Live session
+
+## Explicit manual completion
+
+Stage two exposes **完成任務** as a first-class visible action. It is no longer hidden behind the generic end button.
+
+The adjacent **⋯** menu contains **只結束 AI 通話**, which stops Gemini Live but leaves the task resumable in history.
+
+## Bilingual external transcript
+
+External conversation messages store the real spoken transcript as the canonical `Message.content`. Optional display translation metadata is stored separately:
+
+- `translatedText`
+- `originalLanguage`
+- `translatedLanguage`
+
+Translations are generated asynchronously with the same Gemini API key using a lightweight translation request. They are UI metadata only: translated text is never submitted back into AgentHarness, never becomes another user/external turn, and never changes the canonical original transcript.
+
+Stage two defaults to **雙語**:
+- the user's language translation is shown prominently
+- the actual spoken original is shown below in smaller muted text
+
+The user can switch between:
+- **雙語**
+- **譯文**
+- **原文**
+
+Translation metadata is persisted with session history, so already-translated records do not need to be translated again.
