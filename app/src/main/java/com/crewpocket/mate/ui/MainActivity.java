@@ -977,9 +977,9 @@ public class MainActivity extends Activity {
 
             modeActions.setVisibility(active && taskIsReady && !privateEditing
                     ? View.VISIBLE : View.GONE);
-            utilities.setVisibility(active && !privateEditing
-                    && speechAudience != SpeechAudience.EXTERNAL_WITH_MATE
-                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+            utilities.setVisibility(active
+                    && session.status() == CommunicationSession.Status.COMPLETED
+                    ? View.VISIBLE : View.GONE);
         } else {
             statusText.setVisibility(active ? View.VISIBLE : View.GONE);
             externalSectionTitle.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
