@@ -5,6 +5,8 @@ Crew Mate is a voice-first AI assistant for **in-person communication**. The use
 ## Product flow
 
 ```text
+User selects their language and the other person's language
+    ↓
 User privately briefs Mate by voice or text
     ↓
 Mate identifies the person, goal, constraints, and limits
@@ -63,8 +65,8 @@ CommunicationSession
 
 The physical handoff is explicit:
 
-- `PRIVATE_TO_MATE`: the user explicitly opened briefing/context-update mode. Only this mode can add or change private user context.
-- `EXTERNAL_WITH_MATE`: the other person is speaking to Mate. External microphone speech never becomes user context.
+- `PRIVATE_TO_MATE`: the user explicitly opened briefing/context-update mode. Only this mode can add or change private user context, and Mate uses the selected user language.
+- `EXTERNAL_WITH_MATE`: the other person is speaking to Mate. External microphone speech never becomes user context, and Mate replies in the selected other-person language.
 - `MATE_HANDLING`: no microphone speaker is assigned.
 - `USER_DIRECT`: the user has taken over the human conversation; Mate does not listen or speak.
 - `IDLE`: no live conversation is active.
@@ -140,3 +142,13 @@ gradle :app:testDebugUnitTest :app:assembleDebug
 ```
 
 Then install the debug APK with Android Studio or ADB, enter a Gemini API key in Settings, brief Mate, and start an in-person handoff.
+
+
+## Conversation languages
+
+Each task stores two independent language preferences:
+
+- user language
+- other-person language
+
+The compact language control uses the form `🌐 user → other person`. Either side can use automatic detection. Language changes are pushed into the active Gemini Live session without recreating the task.

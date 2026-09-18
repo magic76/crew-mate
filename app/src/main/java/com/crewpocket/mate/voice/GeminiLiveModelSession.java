@@ -67,6 +67,8 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile boolean speaking;
     private volatile boolean externalSpeechObserved;
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
+    private volatile String userLanguage = "AUTO";
+    private volatile String otherPersonLanguage = "AUTO";
     private volatile boolean userAudioEnabled;
     private volatile boolean playbackEnabled;
     private AudioRecord recorder;
@@ -202,6 +204,12 @@ public final class GeminiLiveModelSession implements ModelSession {
     public boolean isPlaybackEnabled() { return playbackEnabled; }
     public SpeechAudience speechAudience() { return speechAudience; }
 
+    public synchronized void setConversationLanguages(String userValue, String otherValue) {
+        userLanguage = normalizeLanguage(userValue);
+        otherPersonLanguage = normalizeLanguage(otherValue);
+        if (running && setupReady) sendClientContextNow();
+    }
+
     /**
      * Authoritative physical speech boundary. Every audience transition ends the previous microphone
      * stream, releases AudioRecord, flushes playback, sends explicit audience context, then
@@ -240,18 +248,22 @@ public final class GeminiLiveModelSession implements ModelSession {
     }
 
     private String buildAudienceContext() {
-        String prefix = "AUDIENCE_MODE=" + speechAudience.name() + "\n";
+        String prefix = "AUDIENCE_MODE=" + speechAudience.name()
+                + "\nUSER_LANGUAGE=" + userLanguage
+                + "\nOTHER_PERSON_LANGUAGE=" + otherPersonLanguage + "\n";
         switch (speechAudience) {
             case PRIVATE_TO_MATE:
                 return prefix
                         + "Next microphone speech is the USER speaking privately to Mate. "
-                        + "Treat it as private instruction. Do not expose or copy the private brief to the other person.";
+                        + "Treat it as private instruction. Do not expose or copy the private brief to the other person. "
+                        + privateLanguageInstruction();
             case EXTERNAL_WITH_MATE:
                 return prefix
                         + "Next microphone speech is the OTHER PERSON speaking directly with Mate in an in-person conversation. "
                         + "WAIT SILENTLY until that person actually speaks into the microphone. Do not simulate, predict, or invent what they might say. "
                         + "Do not treat it as a private user instruction. Only after real external speech is received, respond directly to that person, "
-                        + "keep the user's private goal and constraints active.";
+                        + "keep the user's private goal and constraints active. "
+                        + externalLanguageInstruction();
             case USER_DIRECT:
                 return prefix
                         + "The user personally took over the human conversation. Do not speak until control returns.";
@@ -262,6 +274,22 @@ public final class GeminiLiveModelSession implements ModelSession {
             default:
                 return prefix + "No live speaker is assigned.";
         }
+    }
+
+    private String privateLanguageInstruction() {
+        if ("AUTO".equals(userLanguage)) {
+            return "Detect the user's language from their actual speech/text and reply to the user in that language.";
+        }
+        return "The user's preferred language is " + userLanguage
+                + ". Understand natural variations, and reply privately to the user in that language.";
+    }
+
+    private String externalLanguageInstruction() {
+        if ("AUTO".equals(otherPersonLanguage)) {
+            return "Detect the other person's actual language and reply naturally in the same language.";
+        }
+        return "The selected language for the other person is " + otherPersonLanguage
+                + ". Reply aloud to the other person in that language unless they clearly switch languages.";
     }
 
     private void sendClientContextNow() {
@@ -594,6 +622,11 @@ public final class GeminiLiveModelSession implements ModelSession {
             return out;
         }
         return value == JSONObject.NULL ? null : value;
+    }
+
+    private static String normalizeLanguage(String value) {
+        if (value == null || value.trim().isEmpty()) return "AUTO";
+        return value.trim();
     }
 
     private static String normalizeVoice(String value) {

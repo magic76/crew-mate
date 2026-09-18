@@ -87,6 +87,8 @@ public final class SessionStore {
         root.put("target_person_id", session.targetPersonId());
         root.put("goal", session.goal());
         root.put("outcome_summary", session.outcomeSummary());
+        root.put("user_language", session.userLanguage());
+        root.put("other_person_language", session.otherPersonLanguage());
         root.put("user_direct_control", session.userDirectControl());
         root.put("status", session.status().name());
         root.put("pending_user_question", session.pendingUserQuestion());
@@ -113,6 +115,9 @@ public final class SessionStore {
             session.setTarget(root.optString("target_person_id"), root.optString("target_person"));
             session.setGoal(root.optString("goal"));
             session.setOutcomeSummary(root.optString("outcome_summary"));
+            session.setLanguages(
+                    root.optString("user_language", "AUTO"),
+                    root.optString("other_person_language", "AUTO"));
             session.setUserDirectControl(root.optBoolean("user_direct_control", false));
             session.setPendingUserQuestion(root.optString("pending_user_question"));
 
