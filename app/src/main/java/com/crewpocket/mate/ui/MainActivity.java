@@ -7,14 +7,17 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -26,6 +29,7 @@ import android.widget.Toast;
 import com.crewpocket.mate.agent.CrewMateRuntime;
 import com.crewpocket.mate.config.AppConfig;
 import com.crewpocket.mate.model.CommunicationSession;
+import com.crewpocket.mate.model.LiveCallState;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
 import com.crewpocket.mate.storage.SessionStore;
@@ -62,6 +66,9 @@ public class MainActivity extends Activity {
     private Button primaryButton;
     private Button directButton;
     private Button settingsButton;
+    private LinearLayout callBar;
+    private TextView callStateText;
+    private Button callToggleButton;
     private TextView statusText;
     private TextView taskText;
     private LinearLayout taskComposerCard;
@@ -85,6 +92,7 @@ public class MainActivity extends Activity {
     private GeminiLiveModelSession modelSession;
     private SessionStore sessionStore;
     private CommunicationSession viewedSession;
+    private LiveCallState liveCallState = LiveCallState.OFF;
     private SpeechAudience speechAudience = SpeechAudience.IDLE;
     private SpeechAudience pendingInputAudience = SpeechAudience.IDLE;
     private SpeechAudience privateReturnAudience = SpeechAudience.MATE_HANDLING;
@@ -132,10 +140,40 @@ public class MainActivity extends Activity {
     }
 
     private View buildUi() {
-        LinearLayout root = new LinearLayout(this);
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(16), dp(18), dp(16));
+        final int baseLeft = dp(18);
+        final int baseTop = dp(16);
+        final int baseRight = dp(18);
+        final int baseBottom = dp(16);
+        root.setPadding(baseLeft, baseTop, baseRight, baseBottom);
         root.setBackgroundColor(bg);
+        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+                int left;
+                int top;
+                int right;
+                int bottom;
+                if (Build.VERSION.SDK_INT >= 30) {
+                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                    left = bars.left;
+                    top = bars.top;
+                    right = bars.right;
+                    bottom = bars.bottom;
+                } else {
+                    left = insets.getSystemWindowInsetLeft();
+                    top = insets.getSystemWindowInsetTop();
+                    right = insets.getSystemWindowInsetRight();
+                    bottom = insets.getSystemWindowInsetBottom();
+                }
+                v.setPadding(
+                        baseLeft + left,
+                        baseTop + top,
+                        baseRight + right,
+                        baseBottom + bottom);
+                return insets;
+            }
+        });
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
@@ -161,6 +199,29 @@ public class MainActivity extends Activity {
         });
         top.addView(settingsButton, new LinearLayout.LayoutParams(dp(72), dp(38)));
         root.addView(top);
+
+        callBar = new LinearLayout(this);
+        callBar.setOrientation(LinearLayout.HORIZONTAL);
+        callBar.setGravity(Gravity.CENTER_VERTICAL);
+        callBar.setPadding(dp(12), dp(8), dp(8), dp(8));
+        callBar.setBackground(roundRect(surface, 14));
+
+        callStateText = new TextView(this);
+        callStateText.setTextSize(12);
+        callStateText.setTypeface(Typeface.DEFAULT_BOLD);
+        callBar.addView(callStateText,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        callToggleButton = actionButton("開啟", surface2);
+        callToggleButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { handleLiveCallToggle(); }
+        });
+        callBar.addView(callToggleButton, new LinearLayout.LayoutParams(dp(82), dp(38)));
+
+        LinearLayout.LayoutParams callLp = cardLp(dp(10));
+        callLp.setMargins(0, dp(12), 0, dp(10));
+        root.addView(callBar, callLp);
+        renderLiveCallControl();
 
         statusText = new TextView(this);
         statusText.setText("Ready");
@@ -318,20 +379,80 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        if (isInPersonMode() && runtime != null && taskReady(viewedSession)) {
-            handToOtherPerson();
+        if (isInPersonMode() && taskReady(viewedSession)) {
+            if (runtime != null) {
+                handToOtherPerson();
+            } else {
+                ensureRuntime(SpeechAudience.EXTERNAL_WITH_MATE);
+            }
             return;
         }
         if (runtime != null) {
             enterPrivateSupplement();
             return;
         }
-        if (viewedSession != null && viewedSession.status() == CommunicationSession.Status.STOPPED) {
-            ensureRuntime(SpeechAudience.MATE_HANDLING);
-            return;
-        }
         privateReturnAudience = SpeechAudience.MATE_HANDLING;
         ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
+    }
+
+    private void handleLiveCallToggle() {
+        if (liveCallState == LiveCallState.ACTIVE || liveCallState == LiveCallState.CONNECTING) {
+            if (runtime != null) {
+                stopRuntime();
+            } else {
+                setLiveCallState(LiveCallState.OFF);
+            }
+            return;
+        }
+
+        SpeechAudience desiredAudience = preferredCallAudience();
+        if (runtime != null) stopRuntime();
+        ensureRuntime(desiredAudience);
+    }
+
+    private SpeechAudience preferredCallAudience() {
+        if (speechAudience == SpeechAudience.USER_DIRECT) return SpeechAudience.USER_DIRECT;
+        if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) return SpeechAudience.PRIVATE_TO_MATE;
+        if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) return SpeechAudience.EXTERNAL_WITH_MATE;
+        return taskReady(viewedSession)
+                ? SpeechAudience.MATE_HANDLING
+                : SpeechAudience.PRIVATE_TO_MATE;
+    }
+
+    private void setLiveCallState(LiveCallState state) {
+        liveCallState = state == null ? LiveCallState.OFF : state;
+        renderLiveCallControl();
+    }
+
+    private void renderLiveCallControl() {
+        if (callStateText == null || callToggleButton == null || callBar == null) return;
+        switch (liveCallState) {
+            case CONNECTING:
+                callStateText.setText("AI 通話連線中…");
+                callStateText.setTextColor(amber);
+                callToggleButton.setText("取消");
+                callToggleButton.setBackground(roundRect(surface2, 11));
+                break;
+            case ACTIVE:
+                callStateText.setText("● AI 通話中");
+                callStateText.setTextColor(green);
+                callToggleButton.setText("結束");
+                callToggleButton.setBackground(roundRect(Color.rgb(127, 29, 29), 11));
+                break;
+            case ERROR:
+                callStateText.setText("AI 通話連線失敗");
+                callStateText.setTextColor(red);
+                callToggleButton.setText("重試");
+                callToggleButton.setBackground(roundRect(accent, 11));
+                break;
+            case OFF:
+            default:
+                callStateText.setText("AI 通話已關閉");
+                callStateText.setTextColor(muted);
+                callToggleButton.setText("開啟");
+                callToggleButton.setBackground(roundRect(surface2, 11));
+                break;
+        }
     }
 
     private void submitTypedBrief() {
@@ -464,6 +585,7 @@ public class MainActivity extends Activity {
     }
 
     private void startRuntime(String key, final SpeechAudience initialAudience) {
+        setLiveCallState(LiveCallState.CONNECTING);
         inputTurn.clear();
         pendingInputAudience = SpeechAudience.IDLE;
         handler.removeCallbacks(flushInputTurnRunnable);
@@ -483,6 +605,13 @@ public class MainActivity extends Activity {
             @Override public void onStatus(final String value) {
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
+                        if ("Listening".equals(value) || "Ready".equals(value)) {
+                            setLiveCallState(LiveCallState.ACTIVE);
+                        } else if (value != null && value.contains("Connecting")) {
+                            setLiveCallState(LiveCallState.CONNECTING);
+                        } else if ("Stopped".equals(value)) {
+                            setLiveCallState(LiveCallState.OFF);
+                        }
                         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE && "Listening".equals(value)) {
                             status("Listening", accent);
                         }
@@ -531,7 +660,10 @@ public class MainActivity extends Activity {
 
             @Override public void onError(final String message) {
                 runOnUiThread(new Runnable() {
-                    @Override public void run() { status(message, red); }
+                    @Override public void run() {
+                        setLiveCallState(LiveCallState.ERROR);
+                        status(message, red);
+                    }
                 });
             }
         });
@@ -575,9 +707,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean shouldResume(CommunicationSession session) {
-        if (session == null || session.targetPersonId().isEmpty()) return false;
-        return session.status() != CommunicationSession.Status.COMPLETED
-                && session.status() != CommunicationSession.Status.ERROR;
+        return session != null && session.status() != CommunicationSession.Status.COMPLETED;
     }
 
     private void flushInputTurn() {
@@ -603,6 +733,7 @@ public class MainActivity extends Activity {
         if (target != null) target.close();
         runtime = null;
         modelSession = null;
+        setLiveCallState(LiveCallState.OFF);
         if (session != null) {
             viewedSession = session;
             sessionStore.save(session);
@@ -621,6 +752,7 @@ public class MainActivity extends Activity {
         if (runtime != null) stopRuntime();
         viewedSession = null;
         speechAudience = SpeechAudience.IDLE;
+        setLiveCallState(LiveCallState.OFF);
         renderSession(null);
         status("Ready", muted);
     }
@@ -893,10 +1025,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (runtime == null && session.status() == CommunicationSession.Status.STOPPED) {
-            primaryButton.setText("讓 Mate 繼續");
-            primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
-        } else if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
+        if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
             primaryButton.setText("回答 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
         } else if (isInPersonMode() && taskReady(session)) {
