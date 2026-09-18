@@ -9,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
@@ -17,6 +18,7 @@ import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowInsets;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -142,6 +144,9 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
         sessionStore = new SessionStore(this);
         translationService = new GeminiTranslationService(AppConfig.getApiKey(this));
         selectedUserLanguage = defaultUserLanguage();
@@ -190,7 +195,8 @@ public class MainActivity extends Activity {
         final int baseTop = dp(16);
         final int baseRight = dp(18);
         final int baseBottom = dp(16);
-        root.setPadding(baseLeft, baseTop, baseRight, baseBottom);
+        final int bottomSafety = dp(10);
+        root.setPadding(baseLeft, baseTop, baseRight, baseBottom + bottomSafety);
         root.setBackgroundColor(bg);
         root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
@@ -199,11 +205,14 @@ public class MainActivity extends Activity {
                 int right;
                 int bottom;
                 if (Build.VERSION.SDK_INT >= 30) {
-                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                    left = bars.left;
-                    top = bars.top;
-                    right = bars.right;
-                    bottom = bars.bottom;
+                    Insets barsAndCutout = insets.getInsets(
+                            WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    Insets navigation = insets.getInsets(
+                            WindowInsets.Type.navigationBars() | WindowInsets.Type.mandatorySystemGestures());
+                    left = barsAndCutout.left;
+                    top = barsAndCutout.top;
+                    right = barsAndCutout.right;
+                    bottom = Math.max(barsAndCutout.bottom, navigation.bottom);
                 } else {
                     left = insets.getSystemWindowInsetLeft();
                     top = insets.getSystemWindowInsetTop();
@@ -214,9 +223,12 @@ public class MainActivity extends Activity {
                         baseLeft + left,
                         baseTop + top,
                         baseRight + right,
-                        baseBottom + bottom);
+                        baseBottom + bottom + bottomSafety);
                 return insets;
             }
+        });
+        root.post(new Runnable() {
+            @Override public void run() { root.requestApplyInsets(); }
         });
 
         LinearLayout top = new LinearLayout(this);
@@ -445,7 +457,10 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(dp(48), dp(52));
         moreLp.setMargins(dp(8), 0, 0, 0);
         modeActions.addView(moreButton, moreLp);
-        root.addView(modeActions);
+        LinearLayout.LayoutParams modeLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        modeLp.setMargins(0, 0, 0, dp(8));
+        root.addView(modeActions, modeLp);
 
         utilities = new LinearLayout(this);
         utilities.setVisibility(View.GONE);
