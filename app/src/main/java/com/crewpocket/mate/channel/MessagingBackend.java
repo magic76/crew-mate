@@ -1,13 +1,7 @@
 package com.crewpocket.mate.channel;
 
-import java.util.List;
-
-/** Provider boundary. Telegram/LINE/email adapters implement this without changing the agent loop. */
+/** Local in-person participant resolver used by Crew Mate's physical handoff flow. */
 public interface MessagingBackend {
-    enum ChannelMode { IN_PERSON, REMOTE }
-
-    default ChannelMode channelMode() { return ChannelMode.REMOTE; }
-
     final class Contact {
         public final String id;
         public final String displayName;
@@ -18,56 +12,10 @@ public interface MessagingBackend {
         }
     }
 
-    final class RemoteMessage {
-        public final String id;
-        public final String sender;
-        public final String content;
-        public final long timestamp;
-        public final boolean outgoing;
-
-        public RemoteMessage(String id, String sender, String content, long timestamp, boolean outgoing) {
-            this.id = id == null ? "" : id;
-            this.sender = sender == null ? "" : sender;
-            this.content = content == null ? "" : content;
-            this.timestamp = timestamp;
-            this.outgoing = outgoing;
-        }
-    }
-
     interface FindCallback {
         void onFound(Contact contact);
         void onError(String message);
     }
 
-    interface ConversationCallback {
-        void onLoaded(List<RemoteMessage> messages);
-        void onError(String message);
-    }
-
-    interface SendCallback {
-        /** Provider accepted/created the outbound message. Despite the legacy name, this is not a read receipt. */
-        void onDelivered(String providerMessageId);
-        void onReply(RemoteMessage reply);
-        void onError(String message);
-    }
-
-    interface IncomingCallback {
-        void onMessage(RemoteMessage message);
-        void onError(String message);
-    }
-
     void findContact(String query, FindCallback callback);
-    void getConversation(Contact contact, ConversationCallback callback);
-    void sendMessage(Contact contact, String content, SendCallback callback);
-
-    /**
-     * Observe the next inbound message for one contact after a known timestamp. Providers that
-     * support background continuation should override this. The shared agent harness is not involved.
-     */
-    default void watchIncoming(Contact contact, long afterTimestamp, IncomingCallback callback) {
-        if (callback != null) callback.onError("This messaging provider does not support background reply watching.");
-    }
-
-    /** Stop provider polling/background resources owned by this backend instance. */
-    default void shutdown() {}
 }
