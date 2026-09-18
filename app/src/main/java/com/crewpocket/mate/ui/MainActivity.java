@@ -1129,18 +1129,23 @@ public class MainActivity extends Activity {
         String goal = session.goal().isEmpty() ? "尚未確認" : session.goal();
         String constraints = session.constraints().isEmpty() ? "尚未設定" : session.constraints();
         String boundary = session.escalationBoundary().isEmpty() ? "尚未設定" : session.escalationBoundary();
-        String paymentPreference = session.paymentPreference().isEmpty() ? "未指定" : session.paymentPreference();
-        String paymentFallback = session.paymentFallback().isEmpty()
-                ? "未授權替代方式；不同付款方式要先問你"
-                : session.paymentFallback();
+        boolean hasPaymentPolicy = !session.paymentPreference().isEmpty()
+                || !session.paymentFallback().isEmpty();
+        String paymentPreference = session.paymentPreference();
+        String paymentFallback = session.paymentFallback();
         StringBuilder task = new StringBuilder();
 
         if (publicConversation && !privateEditing) {
             task.append("Mate ↔ ").append(person)
                     .append("  ·  ").append(languageLabel(selectedOtherLanguage))
                     .append("\n目的：").append(goal);
-            if (!session.paymentPreference().isEmpty()) {
-                task.append("\n付款：").append(paymentPreference);
+            if (hasPaymentPolicy) {
+                if (!paymentPreference.isEmpty()) {
+                    task.append("\n付款：").append(paymentPreference);
+                }
+                if (!paymentFallback.isEmpty()) {
+                    task.append(" · 可接受：").append(paymentFallback);
+                }
             }
             taskText.setTextSize(13);
             taskText.setBackground(roundRect(surface2, 12));
@@ -1149,10 +1154,16 @@ public class MainActivity extends Activity {
                     .append(taskIsReady ? "  ✓ 已對齊" : "  · 尚未完成")
                     .append("\n\n對象：").append(person)
                     .append("\n目的：").append(goal)
-                    .append("\n限制／條件：").append(constraints)
-                    .append("\n付款方式：").append(paymentPreference)
-                    .append("\n付款替代：").append(paymentFallback)
-                    .append("\n需要回來問你：").append(boundary)
+                    .append("\n限制／條件：").append(constraints);
+            if (hasPaymentPolicy) {
+                task.append("\n付款方式：")
+                        .append(paymentPreference.isEmpty() ? "未指定" : paymentPreference);
+                task.append("\n付款替代：")
+                        .append(paymentFallback.isEmpty()
+                                ? "未授權；不同付款方式要先問你"
+                                : paymentFallback);
+            }
+            task.append("\n需要回來問你：").append(boundary)
                     .append("\n語言：").append(languageLabel(selectedUserLanguage))
                     .append(" → ").append(languageLabel(selectedOtherLanguage));
             taskText.setTextSize(taskIsReady ? 15 : 14);
