@@ -31,6 +31,7 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private final Listener listener;
     private volatile boolean closed;
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
+    private volatile boolean externalSpeechObserved;
 
     public CrewMateRuntime(ModelSession modelSession, MessagingBackend backend, Listener listener) {
         this(new CommunicationSession(), modelSession, backend, listener);
@@ -56,6 +57,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         // Finish any visible spoken model turn under the audience that actually heard it.
         commitModelTurn();
         speechAudience = next;
+        // Every physical handoff starts silent. Mate may answer only after the other person actually speaks.
+        externalSpeechObserved = false;
     }
 
     public void start() {
@@ -167,8 +170,8 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         if (closed || session.userDirectControl() || speechAudience != SpeechAudience.EXTERNAL_WITH_MATE) return;
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return;
-        String person = session.targetPerson().isEmpty() ? "Other person" : session.targetPerson();
         session.addMessage(new Message(Message.Sender.OTHER_PERSON, "MATE", value, Message.Status.RECEIVED));
+        externalSpeechObserved = true;
         session.setStatus(CommunicationSession.Status.THINKING);
         notifyChanged();
     }
@@ -236,8 +239,11 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
         String completed = modelTurn.take();
         if (completed.isEmpty()) return;
         if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+            // Never let a model-only turn create a fake physical conversation.
+            if (!externalSpeechObserved) return;
             String recipient = session.targetPerson().isEmpty() ? "OTHER_PERSON" : session.targetPerson();
             session.addMessage(new Message(Message.Sender.MATE, recipient, completed, Message.Status.INFO));
+            externalSpeechObserved = false;
             notifyChanged();
         } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             session.addMessage(new Message(Message.Sender.MATE, "USER", completed, Message.Status.INFO));
