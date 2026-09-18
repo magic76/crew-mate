@@ -105,6 +105,7 @@ public class MainActivity extends Activity {
     private Button taskInputButton;
     private Button taskVoiceButton;
     private LinearLayout modeActions;
+    private View bottomActionSpacer;
     private LinearLayout utilities;
     private Button newTaskButton;
     private Button historyButton;
@@ -424,8 +425,17 @@ public class MainActivity extends Activity {
         privateLp.setMargins(0, dp(6), 0, dp(10));
         root.addView(privateScroll, privateLp);
 
+        bottomActionSpacer = new View(this);
+        bottomActionSpacer.setVisibility(View.GONE);
+        root.addView(bottomActionSpacer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
         modeActions = new LinearLayout(this);
         modeActions.setOrientation(LinearLayout.HORIZONTAL);
+        modeActions.setGravity(Gravity.BOTTOM | Gravity.CENTER_VERTICAL);
+        modeActions.setClipChildren(false);
+        modeActions.setClipToPadding(false);
+        modeActions.setPadding(0, dp(4), 0, dp(8));
         primaryButton = actionButton("🔒 交代給 Mate", accent);
         primaryButton.setTextSize(13);
         primaryButton.setOnClickListener(new View.OnClickListener() {
@@ -459,7 +469,7 @@ public class MainActivity extends Activity {
         modeActions.addView(moreButton, moreLp);
         LinearLayout.LayoutParams modeLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        modeLp.setMargins(0, 0, 0, dp(8));
+        modeLp.setMargins(0, 0, 0, 0);
         root.addView(modeActions, modeLp);
 
         utilities = new LinearLayout(this);
@@ -1241,6 +1251,11 @@ public class MainActivity extends Activity {
             meta.setPadding(0, dp(8), 0, 0);
             card.addView(meta);
 
+            LinearLayout cardActions = new LinearLayout(this);
+            cardActions.setOrientation(LinearLayout.HORIZONTAL);
+            cardActions.setGravity(Gravity.CENTER_VERTICAL);
+            cardActions.setPadding(0, dp(8), 0, 0);
+
             TextView action = new TextView(this);
             action.setText(session.status() == CommunicationSession.Status.COMPLETED
                     ? "查看詳情  ›"
@@ -1248,8 +1263,18 @@ public class MainActivity extends Activity {
             action.setTextColor(accent);
             action.setTextSize(11);
             action.setTypeface(Typeface.DEFAULT_BOLD);
-            action.setPadding(0, dp(8), 0, 0);
-            card.addView(action);
+            cardActions.addView(action, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            Button remove = actionButton("移除", Color.rgb(88, 38, 48));
+            remove.setTextSize(10);
+            remove.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    confirmRemoveHistorySession(session, dialog);
+                }
+            });
+            cardActions.addView(remove, new LinearLayout.LayoutParams(dp(58), dp(34)));
+            card.addView(cardActions);
 
             card.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
@@ -1429,7 +1454,18 @@ public class MainActivity extends Activity {
         close.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { dialog.dismiss(); }
         });
-        actions.addView(close, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        actions.addView(close, new LinearLayout.LayoutParams(0, dp(44), 0.8f));
+
+        Button remove = actionButton("移除", Color.rgb(88, 38, 48));
+        remove.setTextSize(10);
+        remove.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                confirmRemoveHistorySession(session, dialog);
+            }
+        });
+        LinearLayout.LayoutParams removeLp = new LinearLayout.LayoutParams(0, dp(44), 0.78f);
+        removeLp.setMargins(dp(8), 0, 0, 0);
+        actions.addView(remove, removeLp);
 
         Button primary = actionButton(
                 session.status() == CommunicationSession.Status.COMPLETED
@@ -1455,6 +1491,64 @@ public class MainActivity extends Activity {
             @Override public void onShow(DialogInterface ignored) { styleHistoryDialog(dialog); }
         });
         dialog.show();
+    }
+
+    private void confirmRemoveHistorySession(final CommunicationSession session,
+                                             final AlertDialog sourceDialog) {
+        if (session == null) return;
+        boolean active = viewedSession != null
+                && viewedSession.sessionId.equals(session.sessionId);
+        String message = active
+                ? "這是目前正在使用的任務。移除後會結束 AI 通話並刪除這筆紀錄，且無法復原。"
+                : "移除後這筆任務與對話紀錄都會刪除，且無法復原。";
+
+        new AlertDialog.Builder(this)
+                .setTitle("移除這筆紀錄？")
+                .setMessage(message)
+                .setPositiveButton("移除", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        removeHistorySession(session, sourceDialog);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void removeHistorySession(CommunicationSession session, AlertDialog sourceDialog) {
+        if (session == null) return;
+        boolean active = viewedSession != null
+                && viewedSession.sessionId.equals(session.sessionId);
+
+        if (active && runtime != null) {
+            stopRuntime();
+        }
+
+        boolean removed = sessionStore.deleteById(session.sessionId);
+        if (!removed) {
+            Toast.makeText(this, "無法移除這筆紀錄", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (sourceDialog != null) sourceDialog.dismiss();
+
+        if (active) {
+            viewedSession = null;
+            speechAudience = SpeechAudience.IDLE;
+            privateReturnAudience = SpeechAudience.MATE_HANDLING;
+            oneShotPrivateSupplement = false;
+            pendingTypedBrief = "";
+            setLiveCallState(LiveCallState.OFF);
+            selectedUserLanguage = defaultUserLanguage();
+            selectedOtherLanguage = "AUTO";
+            renderLanguageControl();
+            renderSession(null);
+            status("Ready", muted);
+        }
+
+        Toast.makeText(this, "紀錄已移除", Toast.LENGTH_SHORT).show();
+        if (!sessionStore.loadAll().isEmpty()) {
+            showHistory();
+        }
     }
 
     private void styleHistoryDialog(AlertDialog dialog) {
@@ -1684,10 +1778,12 @@ public class MainActivity extends Activity {
             boolean showAlignmentAction = active && !privateEditing
                     && !stageTwo
                     && session.status() != CommunicationSession.Status.COMPLETED;
-            modeActions.setVisibility((showAlignmentAction
+            boolean showActions = showAlignmentAction
                     || needsDecision
                     || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    || speechAudience == SpeechAudience.USER_DIRECT)
+                    || speechAudience == SpeechAudience.USER_DIRECT;
+            modeActions.setVisibility(showActions ? View.VISIBLE : View.GONE);
+            bottomActionSpacer.setVisibility(showActions && !showExternalTimeline
                     ? View.VISIBLE : View.GONE);
             utilities.setVisibility(active
                     && session.status() == CommunicationSession.Status.COMPLETED
@@ -1708,6 +1804,8 @@ public class MainActivity extends Activity {
                     && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
             audienceCard.setVisibility(View.VISIBLE);
             modeActions.setVisibility(active ? View.VISIBLE : View.GONE);
+            bottomActionSpacer.setVisibility(active && !publicConversation
+                    ? View.VISIBLE : View.GONE);
             utilities.setVisibility(active ? View.VISIBLE : View.GONE);
         }
 
@@ -1721,6 +1819,7 @@ public class MainActivity extends Activity {
             taskVoiceButton.setText("🎙  口頭交代");
             audienceCard.setVisibility(View.GONE);
             modeActions.setVisibility(View.GONE);
+            bottomActionSpacer.setVisibility(View.GONE);
             utilities.setVisibility(View.GONE);
             transcriptModeButton.setVisibility(View.GONE);
             renderAudience(null);
