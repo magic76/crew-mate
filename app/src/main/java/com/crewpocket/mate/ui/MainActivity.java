@@ -44,6 +44,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int REQUEST_AUDIO = 701;
     private static final long INPUT_TRANSCRIPT_SETTLE_MS = 900L;
+    private static final long PRIVATE_SUPPLEMENT_SETTLE_MS = 1400L;
 
     private static final String[] LANGUAGE_CODES = new String[]{
             "AUTO", "zh-TW", "en-US", "th-TH", "ja-JP", "ko-KR", "vi-VN",
@@ -122,6 +123,7 @@ public class MainActivity extends Activity {
     private String selectedUserLanguage = "AUTO";
     private String selectedOtherLanguage = "AUTO";
     private AudioOutputMode audioOutputMode = AudioOutputMode.MEDIA;
+    private boolean oneShotPrivateSupplement;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -617,8 +619,18 @@ public class MainActivity extends Activity {
                 callToggleButton.setBackground(roundRect(surface2, 11));
                 break;
             case ACTIVE:
-                callStateText.setText("● AI 通話中");
-                callStateText.setTextColor(green);
+                if (speechAudience == SpeechAudience.PRIVATE_TO_MATE
+                        && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+                    callStateText.setText("● 私下補充中 · 請說話");
+                    callStateText.setTextColor(accent);
+                } else if (speechAudience == SpeechAudience.MATE_HANDLING
+                        && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+                    callStateText.setText("● Mate 正在更新補充");
+                    callStateText.setTextColor(amber);
+                } else {
+                    callStateText.setText("● AI 通話中");
+                    callStateText.setTextColor(green);
+                }
                 callToggleButton.setText("結束");
                 callToggleButton.setBackground(roundRect(Color.rgb(127, 29, 29), 11));
                 break;
@@ -652,6 +664,7 @@ public class MainActivity extends Activity {
 
         // Typed input is already private; do not turn the microphone on just to submit text.
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
+            oneShotPrivateSupplement = false;
             applyAudience(SpeechAudience.MATE_HANDLING);
             runtime.finalizeTaskBrief();
             status("正在整理任務共識…", amber);
@@ -680,12 +693,13 @@ public class MainActivity extends Activity {
                 && hasExternalMessages(viewedSession))
                 ? SpeechAudience.EXTERNAL_WITH_MATE
                 : SpeechAudience.MATE_HANDLING;
+        oneShotPrivateSupplement = privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE;
         if (runtime == null) {
             ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
             return;
         }
         applyAudience(SpeechAudience.PRIVATE_TO_MATE);
-        status("Private context", accent);
+        status(oneShotPrivateSupplement ? "請說補充內容，說完會自動繼續" : "Private context", accent);
     }
 
     private void handToOtherPerson() {
@@ -740,6 +754,7 @@ public class MainActivity extends Activity {
         }
         if (runtime != null) runtime.setSpeechAudience(speechAudience);
         if (modelSession != null) modelSession.setSpeechAudience(speechAudience);
+        renderLiveCallControl();
         renderAudience(viewedSession);
         renderControls(viewedSession);
     }
@@ -821,7 +836,10 @@ public class MainActivity extends Activity {
                         pendingInputAudience = audience;
                         inputTurn.append(value);
                         handler.removeCallbacks(flushInputTurnRunnable);
-                        handler.postDelayed(flushInputTurnRunnable, INPUT_TRANSCRIPT_SETTLE_MS);
+                        handler.postDelayed(flushInputTurnRunnable,
+                                oneShotPrivateSupplement && audience == SpeechAudience.PRIVATE_TO_MATE
+                                        ? PRIVATE_SUPPLEMENT_SETTLE_MS
+                                        : INPUT_TRANSCRIPT_SETTLE_MS);
                     }
                 });
             }
@@ -911,6 +929,13 @@ public class MainActivity extends Activity {
         if (target == null) return;
         if (audience == SpeechAudience.PRIVATE_TO_MATE) {
             target.recordUserTranscript(completed);
+            if (oneShotPrivateSupplement
+                    && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+                oneShotPrivateSupplement = false;
+                target.finalizePrivateSupplementAfterCurrentTurn();
+                applyAudience(SpeechAudience.MATE_HANDLING);
+                status("Mate 正在更新補充內容…", amber);
+            }
         } else if (audience == SpeechAudience.EXTERNAL_WITH_MATE) {
             target.recordExternalSpeechTranscript(completed);
         }
@@ -961,6 +986,7 @@ public class MainActivity extends Activity {
         viewedSession = null;
         speechAudience = SpeechAudience.IDLE;
         privateReturnAudience = SpeechAudience.MATE_HANDLING;
+        oneShotPrivateSupplement = false;
         selectedUserLanguage = defaultUserLanguage();
         selectedOtherLanguage = "AUTO";
         pendingTypedBrief = "";
@@ -1200,7 +1226,7 @@ public class MainActivity extends Activity {
                     ? "🔒 補充 context 給 Mate"
                     : "🎙 你正在交代需求");
             audienceDetail.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    ? "現在只有 Mate 在聽。這段會加入你的私人 context，不會直接說給對方。"
+                    ? "現在只有 Mate 在聽。直接說你要補充的內容；停下約 1.4 秒後會自動更新共識並回到對話。"
                     : "現在只有 Mate 在聽。把你想做的事、對象和限制說清楚即可。");
         } else if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             styleAudience(surface2, green);
@@ -1268,7 +1294,7 @@ public class MainActivity extends Activity {
 
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             boolean supplement = privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE;
-            primaryButton.setText(supplement ? "完成補充 · 請 Mate 更新共識" : "我交代完了 · 請 Mate 整理");
+            primaryButton.setText(supplement ? "說完會自動繼續" : "我交代完了 · 請 Mate 整理");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.GONE);
@@ -1279,10 +1305,10 @@ public class MainActivity extends Activity {
                     ? "輸入你要新增的條件或資訊"
                     : "也可以繼續輸入補充內容");
             taskVoiceButton.setText(supplement
-                    ? "✓  補充完畢 · 更新共識"
+                    ? "🎙  正在聽你的補充"
                     : "✓  我交代完了 · 整理共識");
             taskInputButton.setText(supplement
-                    ? "送出 context 並回到對話"
+                    ? "送出補充並繼續"
                     : "送出文字");
             return;
         }
