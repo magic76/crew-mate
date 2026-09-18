@@ -1151,7 +1151,7 @@ public class MainActivity extends Activity {
 
         final LinearLayout sheet = new LinearLayout(this);
         sheet.setOrientation(LinearLayout.VERTICAL);
-        sheet.setPadding(dp(18), dp(16), dp(18), dp(8));
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(14));
         sheet.setBackground(roundRect(surface, 18));
 
         TextView title = new TextView(this);
@@ -1170,14 +1170,22 @@ public class MainActivity extends Activity {
 
         final LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(0, 0, 0, dp(2));
+
         final ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setClipToPadding(false);
         scroll.addView(list);
+
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int desiredListHeight = Math.max(dp(138), sessions.size() * dp(124));
+        int maxListHeight = Math.max(dp(220), (int) (screenHeight * 0.58f));
+        int listHeight = Math.min(desiredListHeight, maxListHeight);
         sheet.addView(scroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(500)));
+                ViewGroup.LayoutParams.MATCH_PARENT, listHeight));
 
         final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(sheet)
-                .setNegativeButton("關閉", null)
                 .create();
 
         for (final CommunicationSession session : sessions) {
@@ -1204,7 +1212,7 @@ public class MainActivity extends Activity {
             state.setTextColor(session.status() == CommunicationSession.Status.COMPLETED ? green
                     : session.status() == CommunicationSession.Status.NEEDS_USER_INPUT ? amber : muted);
             state.setPadding(dp(8), dp(4), dp(8), dp(4));
-            state.setBackground(roundRect(surface, 9));
+            state.setBackground(roundRect(bg, 9));
             header.addView(state);
             card.addView(header);
 
@@ -1252,9 +1260,22 @@ public class MainActivity extends Activity {
 
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, dp(5), 0, dp(7));
+            lp.setMargins(0, dp(4), 0, dp(7));
             list.addView(card, lp);
         }
+
+        Button close = actionButton("關閉", surface2);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dialog.dismiss(); }
+        });
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+        closeLp.setMargins(0, dp(8), 0, 0);
+        sheet.addView(close, closeLp);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface ignored) { styleHistoryDialog(dialog); }
+        });
         dialog.show();
     }
 
