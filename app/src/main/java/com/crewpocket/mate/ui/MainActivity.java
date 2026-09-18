@@ -633,6 +633,9 @@ public class MainActivity extends Activity {
                         && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
                     callStateText.setText("● 私下補充中 · 請說話");
                     callStateText.setTextColor(accent);
+                } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
+                    callStateText.setText("● 你 ↔ Mate 對話中");
+                    callStateText.setTextColor(accent);
                 } else if (speechAudience == SpeechAudience.MATE_HANDLING
                         && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
                     callStateText.setText("● Mate 正在更新補充");
