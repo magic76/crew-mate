@@ -42,6 +42,31 @@ public final class SessionStore {
         } catch (Exception ignored) {}
     }
 
+    public synchronized boolean deleteById(String sessionId) {
+        String target = sessionId == null ? "" : sessionId.trim();
+        if (target.isEmpty()) return false;
+        try {
+            JSONArray existing = readArray();
+            JSONArray next = new JSONArray();
+            boolean removed = false;
+            for (int i = 0; i < existing.length(); i++) {
+                JSONObject item = existing.optJSONObject(i);
+                if (item == null) continue;
+                if (target.equals(item.optString("session_id"))) {
+                    removed = true;
+                    continue;
+                }
+                next.put(item);
+            }
+            if (removed) {
+                preferences.edit().putString(KEY_SESSIONS, next.toString()).apply();
+            }
+            return removed;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     public synchronized CommunicationSession loadLatest() {
         List<CommunicationSession> sessions = loadAll();
         return sessions.isEmpty() ? null : sessions.get(0);
