@@ -37,11 +37,25 @@ import com.crewpocket.mate.voice.GeminiLiveModelSession;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
 
 import java.util.List;
+import java.util.Locale;
 
 /** Task-first UI with an explicit speech audience boundary. */
 public class MainActivity extends Activity {
     private static final int REQUEST_AUDIO = 701;
     private static final long INPUT_TRANSCRIPT_SETTLE_MS = 900L;
+
+    private static final String[] LANGUAGE_CODES = new String[]{
+            "AUTO", "zh-TW", "en-US", "th-TH", "ja-JP", "ko-KR", "vi-VN",
+            "zh-CN", "id-ID", "ms-MY", "es-ES", "fr-FR", "de-DE"
+    };
+    private static final String[] LANGUAGE_LABELS = new String[]{
+            "自動辨識", "繁體中文", "English", "ไทย", "日本語", "한국어", "Tiếng Việt",
+            "简体中文", "Bahasa Indonesia", "Bahasa Melayu", "Español", "Français", "Deutsch"
+    };
+    private static final String[] LANGUAGE_SHORT_LABELS = new String[]{
+            "自動", "繁中", "EN", "ไทย", "日本語", "한국어", "VI",
+            "简中", "ID", "MY", "ES", "FR", "DE"
+    };
 
     private final int bg = Color.rgb(9, 15, 31);
     private final int surface = Color.rgb(17, 25, 47);
@@ -68,6 +82,7 @@ public class MainActivity extends Activity {
     private Button settingsButton;
     private LinearLayout callBar;
     private TextView callStateText;
+    private Button languageButton;
     private Button callToggleButton;
     private TextView statusText;
     private TextView taskText;
@@ -101,6 +116,8 @@ public class MainActivity extends Activity {
     private boolean pendingStartAfterPermission;
     private boolean pendingHandoffAfterPermission;
     private String pendingTypedBrief = "";
+    private String selectedUserLanguage = "AUTO";
+    private String selectedOtherLanguage = "AUTO";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -108,6 +125,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         sessionStore = new SessionStore(this);
+        selectedUserLanguage = defaultUserLanguage();
         setContentView(buildUi());
         restoreRequestedOrLatest(getIntent());
     }
@@ -121,7 +139,12 @@ public class MainActivity extends Activity {
 
     private void restoreRequestedOrLatest(Intent intent) {
         viewedSession = sessionStore.loadLatest();
+        if (viewedSession != null) {
+            selectedUserLanguage = viewedSession.userLanguage();
+            selectedOtherLanguage = viewedSession.otherPersonLanguage();
+        }
         speechAudience = passiveAudience(viewedSession);
+        renderLanguageControl();
         renderSession(viewedSession);
         if (viewedSession == null) {
             status("Ready", muted);
@@ -224,6 +247,15 @@ public class MainActivity extends Activity {
         callBar.addView(callStateText,
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
+        languageButton = actionButton("🌐 自動 → 自動", surface2);
+        languageButton.setTextSize(10);
+        languageButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showLanguagePicker(); }
+        });
+        LinearLayout.LayoutParams languageLp = new LinearLayout.LayoutParams(dp(104), dp(38));
+        languageLp.setMargins(dp(6), 0, dp(6), 0);
+        callBar.addView(languageButton, languageLp);
+
         callToggleButton = actionButton("開啟", surface2);
         callToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { handleLiveCallToggle(); }
@@ -233,6 +265,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams callLp = cardLp(dp(10));
         callLp.setMargins(0, dp(12), 0, dp(10));
         root.addView(callBar, callLp);
+        renderLanguageControl();
         renderLiveCallControl();
 
         statusText = new TextView(this);
@@ -400,6 +433,97 @@ public class MainActivity extends Activity {
         }
         privateReturnAudience = SpeechAudience.MATE_HANDLING;
         ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
+    }
+
+    private void showLanguagePicker() {
+        String[] choices = new String[]{
+                "我的語言：" + languageLabel(selectedUserLanguage),
+                "對方語言：" + languageLabel(selectedOtherLanguage)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("對話語言")
+                .setItems(choices, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        showLanguageChoices(which == 0);
+                    }
+                })
+                .setNegativeButton("關閉", null)
+                .show();
+    }
+
+    private void showLanguageChoices(final boolean userSide) {
+        final String current = userSide ? selectedUserLanguage : selectedOtherLanguage;
+        int checked = languageIndex(current);
+        new AlertDialog.Builder(this)
+                .setTitle(userSide ? "我的語言" : "對方語言")
+                .setSingleChoiceItems(LANGUAGE_LABELS, checked, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String code = LANGUAGE_CODES[Math.max(0, Math.min(which, LANGUAGE_CODES.length - 1))];
+                        if (userSide) {
+                            selectedUserLanguage = code;
+                        } else {
+                            selectedOtherLanguage = code;
+                        }
+                        applySelectedLanguages();
+                        dialog.dismiss();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void applySelectedLanguages() {
+        if (viewedSession != null) {
+            viewedSession.setLanguages(selectedUserLanguage, selectedOtherLanguage);
+            sessionStore.save(viewedSession);
+        }
+        if (modelSession != null) {
+            modelSession.setConversationLanguages(selectedUserLanguage, selectedOtherLanguage);
+        }
+        renderLanguageControl();
+        renderSession(viewedSession);
+    }
+
+    private void renderLanguageControl() {
+        if (languageButton == null) return;
+        languageButton.setText("🌐 " + languageShortLabel(selectedUserLanguage)
+                + " → " + languageShortLabel(selectedOtherLanguage));
+    }
+
+    private static int languageIndex(String code) {
+        String value = code == null ? "AUTO" : code;
+        for (int i = 0; i < LANGUAGE_CODES.length; i++) {
+            if (LANGUAGE_CODES[i].equalsIgnoreCase(value)) return i;
+        }
+        return 0;
+    }
+
+    private static String languageLabel(String code) {
+        return LANGUAGE_LABELS[languageIndex(code)];
+    }
+
+    private static String languageShortLabel(String code) {
+        return LANGUAGE_SHORT_LABELS[languageIndex(code)];
+    }
+
+    private static String defaultUserLanguage() {
+        Locale locale = Locale.getDefault();
+        String language = locale == null ? "" : locale.getLanguage();
+        String country = locale == null ? "" : locale.getCountry();
+        if ("zh".equalsIgnoreCase(language)) {
+            return "CN".equalsIgnoreCase(country) ? "zh-CN" : "zh-TW";
+        }
+        if ("th".equalsIgnoreCase(language)) return "th-TH";
+        if ("ja".equalsIgnoreCase(language)) return "ja-JP";
+        if ("ko".equalsIgnoreCase(language)) return "ko-KR";
+        if ("vi".equalsIgnoreCase(language)) return "vi-VN";
+        if ("id".equalsIgnoreCase(language)) return "id-ID";
+        if ("ms".equalsIgnoreCase(language)) return "ms-MY";
+        if ("es".equalsIgnoreCase(language)) return "es-ES";
+        if ("fr".equalsIgnoreCase(language)) return "fr-FR";
+        if ("de".equalsIgnoreCase(language)) return "de-DE";
+        if ("en".equalsIgnoreCase(language)) return "en-US";
+        return "AUTO";
     }
 
     private void handleLiveCallToggle() {
@@ -603,10 +727,12 @@ public class MainActivity extends Activity {
             liveSession = viewedSession;
         } else {
             liveSession = new CommunicationSession();
+            liveSession.setLanguages(selectedUserLanguage, selectedOtherLanguage);
             viewedSession = liveSession;
             sessionStore.save(liveSession);
         }
 
+        liveSession.setLanguages(selectedUserLanguage, selectedOtherLanguage);
         speechAudience = initialAudience == null ? SpeechAudience.MATE_HANDLING : initialAudience;
 
         modelSession = new GeminiLiveModelSession(this, key, AppConfig.getVoice(this), new GeminiLiveModelSession.UiListener() {
@@ -675,6 +801,7 @@ public class MainActivity extends Activity {
                 });
             }
         });
+        modelSession.setConversationLanguages(selectedUserLanguage, selectedOtherLanguage);
         modelSession.setSpeechAudience(speechAudience);
 
         runtime = new CrewMateRuntime(liveSession, modelSession, new CrewMateRuntime.Listener() {
@@ -778,9 +905,12 @@ public class MainActivity extends Activity {
         viewedSession = null;
         speechAudience = SpeechAudience.IDLE;
         privateReturnAudience = SpeechAudience.MATE_HANDLING;
+        selectedUserLanguage = defaultUserLanguage();
+        selectedOtherLanguage = "AUTO";
         pendingTypedBrief = "";
         if (taskInput != null) taskInput.setText("");
         setLiveCallState(LiveCallState.OFF);
+        renderLanguageControl();
         renderSession(null);
         status("Ready", muted);
     }
@@ -807,7 +937,10 @@ public class MainActivity extends Activity {
                 .setItems(labels, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         viewedSession = sessions.get(which);
+                        selectedUserLanguage = viewedSession.userLanguage();
+                        selectedOtherLanguage = viewedSession.otherPersonLanguage();
                         speechAudience = passiveAudience(viewedSession);
+                        renderLanguageControl();
                         renderSession(viewedSession);
                     }
                 })
@@ -930,7 +1063,9 @@ public class MainActivity extends Activity {
             } else if (taskIsReady) {
                 task.append("Mate 已理解 ✓\n\n")
                         .append("跟誰：").append(person).append("\n")
-                        .append("要做什麼：").append(goal);
+                        .append("要做什麼：").append(goal).append("\n")
+                        .append("語言：").append(languageLabel(selectedUserLanguage))
+                        .append(" → ").append(languageLabel(selectedOtherLanguage));
                 taskText.setTextSize(17);
             } else {
                 task.append("正在理解你的任務…");
@@ -976,7 +1111,8 @@ public class MainActivity extends Activity {
         } else if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             styleAudience(Color.rgb(18, 56, 48), green);
             audienceTitle.setText("Mate 正在跟 " + person + " 對話");
-            audienceDetail.setText("現在麥克風是給對方說話。若你要新增條件或資訊，請先按「補充 context」。");
+            audienceDetail.setText("對方語言：" + languageLabel(selectedOtherLanguage)
+                    + "。現在麥克風是給對方說話；若要新增條件，請先按「補充 context」。");
         } else if (speechAudience == SpeechAudience.USER_DIRECT) {
             styleAudience(Color.rgb(83, 45, 20), direct);
             audienceTitle.setText("你已接手對話");
