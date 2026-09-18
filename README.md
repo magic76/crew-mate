@@ -216,3 +216,21 @@ Crew Mate supports two playback modes for Gemini Live audio:
 The selected mode is persisted globally and can be switched while a Live session is active. Switching recreates the `AudioTrack` with the new attributes without recreating the task or Gemini session. Closing the Live session restores Android's normal audio mode.
 
 The compact top control displays `🔊 媒體` or `☎ 通話`; it remains available during stage two while the language control is hidden to preserve dialogue space.
+
+
+## Live echo protection
+
+Crew Mate uses a turn-taking guard around Gemini playback so Mate does not hear its own speaker output as new external speech:
+
+- Android `AcousticEchoCanceler` is enabled when available on the active `AudioRecord` session.
+- Android `NoiseSuppressor` is enabled when available.
+- microphone frames are not uploaded while Mate audio is actively playing.
+- a short playback-tail guard remains after speech to absorb speaker/room echo.
+
+This intentionally favors stable in-person turn taking over barge-in while Mate is speaking.
+
+## Optional payment consensus
+
+Payment is not a required field for every task. `payment_preference` and `payment_fallback` stay empty for tasks that do not involve payment, and the UI hides payment rows entirely. The agent must not ask payment questions solely to fill the task consensus.
+
+When payment is relevant, changing away from an explicitly selected payment method remains a consequential decision and must be escalated unless the fallback was already authorized.
