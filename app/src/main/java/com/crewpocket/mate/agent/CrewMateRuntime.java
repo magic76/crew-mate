@@ -1,6 +1,5 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
@@ -27,16 +26,15 @@ public final class CrewMateRuntime implements AgentHarness.Listener, CrewMateToo
     private volatile SpeechAudience speechAudience = SpeechAudience.MATE_HANDLING;
     private volatile boolean externalSpeechObserved;
 
-    public CrewMateRuntime(ModelSession modelSession, MessagingBackend backend, Listener listener) {
-        this(new CommunicationSession(), modelSession, backend, listener);
+    public CrewMateRuntime(ModelSession modelSession, Listener listener) {
+        this(new CommunicationSession(), modelSession, listener);
     }
 
-    public CrewMateRuntime(CommunicationSession session, ModelSession modelSession,
-                           MessagingBackend backend, Listener listener) {
+    public CrewMateRuntime(CommunicationSession session, ModelSession modelSession, Listener listener) {
         if (session == null) throw new IllegalArgumentException("session is null");
         this.session = session;
         this.listener = listener;
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, backend, this);
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, this);
         harness = new AgentHarness(new CrewMateAgentSpec(), modelSession, tools.registry(), this);
     }
 
