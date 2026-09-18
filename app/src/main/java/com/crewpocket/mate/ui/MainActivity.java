@@ -682,7 +682,7 @@ public class MainActivity extends Activity {
                 runtime.finalizeTaskBrief();
                 status("Mate 正在更新補充…", amber);
             } else {
-                runtime.finalizeTaskBrief();
+                runtime.finalizePrivateSupplementAfterCurrentTurn();
                 status("Mate 正在整理，會直接跟你確認…", amber);
             }
         } else {
@@ -835,7 +835,7 @@ public class MainActivity extends Activity {
                             String pending = pendingTypedBrief;
                             pendingTypedBrief = "";
                             runtime.submitPrivateText(pending);
-                            runtime.finalizeTaskBrief();
+                            runtime.finalizePrivateSupplementAfterCurrentTurn();
                             status("Mate 正在整理，會直接跟你確認…", amber);
                         }
                     }
