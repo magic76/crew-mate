@@ -378,6 +378,7 @@ public class MainActivity extends Activity {
             flushInputTurn();
             if (privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
                 applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+                Toast.makeText(this, "已加入 Mate context", Toast.LENGTH_SHORT).show();
                 status("External live", green);
             } else {
                 applyAudience(SpeechAudience.MATE_HANDLING);
@@ -477,6 +478,7 @@ public class MainActivity extends Activity {
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE
                 && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+            Toast.makeText(this, "已加入 Mate context", Toast.LENGTH_SHORT).show();
             status("External live", green);
         } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             applyAudience(SpeechAudience.MATE_HANDLING);
