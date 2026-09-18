@@ -1,7 +1,7 @@
 package com.crewpocket.mate.agent;
 
 import com.crewpocket.mate.model.CommunicationSession;
-import com.magic76.crew.agent.ModelEvent;
+import com.magic76.crew.agent.AgentEvent;
 import com.magic76.crew.agent.ModelSession;
 import com.magic76.crew.agent.SessionConfig;
 import com.magic76.crew.agent.ToolResult;
@@ -30,10 +30,9 @@ public class CrewMateRuntimeStateTest {
         CommunicationSession session = new CommunicationSession();
         session.setStatus(CommunicationSession.Status.NEEDS_USER_INPUT);
 
-        RecordingModelSession model = new RecordingModelSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, new RecordingModelSession(), noOpListener());
         runtime.start();
-        model.emit(ModelEvent.simple(ModelEvent.Type.STOPPED));
+        runtime.onAgentEvent(AgentEvent.simple(AgentEvent.Type.STOPPED));
 
         assertEquals(CommunicationSession.Status.NEEDS_USER_INPUT, session.status());
     }
@@ -46,13 +45,11 @@ public class CrewMateRuntimeStateTest {
     }
 
     private static final class RecordingModelSession implements ModelSession {
-        private Listener listener;
-        @Override public void start(SessionConfig config, Listener listener) { this.listener = listener; }
+        @Override public void start(SessionConfig config, Listener listener) {}
         @Override public void sendUserText(String text) {}
         @Override public void sendUserAudio(byte[] audio) {}
         @Override public void sendToolResult(ToolResult result) {}
         @Override public void interrupt() {}
         @Override public void close() {}
-        void emit(ModelEvent event) { if (listener != null) listener.onModelEvent(event); }
     }
 }
