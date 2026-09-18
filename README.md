@@ -171,3 +171,17 @@ Before Crew Mate can enter the external conversation, the user and Mate must sha
 The agent may ask multiple concise clarification questions during the private briefing phase. Target + goal alone are not sufficient to make a task ready when material constraints remain ambiguous.
 
 Any new `PRIVATE_TO_MATE` text or speech immediately invalidates the previous ready state. Mate must update the shared consensus again before the external handoff button is enabled. External speech never modifies private task consensus.
+
+
+## Deterministic briefing finalize
+
+The first-stage briefing no longer depends on the model guessing when the user is done speaking.
+
+When the user taps **我交代完了 · 請 Mate 整理**, the runtime sends an explicit `FINALIZE_TASK_CONSENSUS` product event. Before that turn may finish, Mate must either:
+
+1. update the shared consensus with `ready=true`, or
+2. update it as incomplete and ask exactly one highest-priority clarification question.
+
+If the model finishes without doing either, the runtime retries once. If the retry still produces no terminal consensus state, the product falls back to a visible clarification question instead of leaving the UI stuck indefinitely.
+
+New private context invalidates the prior ready state and uses the same finalize path before handoff or before resuming an external conversation.

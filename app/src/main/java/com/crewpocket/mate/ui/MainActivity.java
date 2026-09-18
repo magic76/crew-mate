@@ -409,14 +409,9 @@ public class MainActivity extends Activity {
         }
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE && runtime != null) {
             flushInputTurn();
-            if (privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
-                applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
-                Toast.makeText(this, "已加入 Mate context", Toast.LENGTH_SHORT).show();
-                status("External live", green);
-            } else {
-                applyAudience(SpeechAudience.MATE_HANDLING);
-                status("Mate handling", green);
-            }
+            applyAudience(SpeechAudience.MATE_HANDLING);
+            runtime.finalizeTaskBrief();
+            status("正在整理任務共識…", amber);
             return;
         }
         if (isInPersonMode() && taskReady(viewedSession)) {
@@ -425,6 +420,16 @@ public class MainActivity extends Activity {
             } else {
                 ensureRuntime(SpeechAudience.EXTERNAL_WITH_MATE);
             }
+            return;
+        }
+        if (viewedSession != null
+                && viewedSession.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
+            enterPrivateSupplement();
+            return;
+        }
+        if (runtime != null && speechAudience == SpeechAudience.MATE_HANDLING) {
+            runtime.finalizeTaskBrief();
+            status("正在整理任務共識…", amber);
             return;
         }
         if (runtime != null) {
@@ -599,14 +604,10 @@ public class MainActivity extends Activity {
         runtime.submitPrivateText(value);
 
         // Typed input is already private; do not turn the microphone on just to submit text.
-        if (speechAudience == SpeechAudience.PRIVATE_TO_MATE
-                && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
-            applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
-            Toast.makeText(this, "已加入 Mate context", Toast.LENGTH_SHORT).show();
-            status("External live", green);
-        } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
+        if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             applyAudience(SpeechAudience.MATE_HANDLING);
-            status("Mate handling", green);
+            runtime.finalizeTaskBrief();
+            status("正在整理任務共識…", amber);
         } else {
             status("Mate handling", green);
         }
@@ -818,10 +819,11 @@ public class MainActivity extends Activity {
                             privateReturnAudience = SpeechAudience.EXTERNAL_WITH_MATE;
                             applyAudience(SpeechAudience.MATE_HANDLING);
                         } else if (session.consensusReady()
-                                && speechAudience == SpeechAudience.PRIVATE_TO_MATE
-                                && privateReturnAudience != SpeechAudience.EXTERNAL_WITH_MATE) {
-                            applyAudience(SpeechAudience.MATE_HANDLING);
-                            status("Consensus ready", green);
+                                && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                                && speechAudience == SpeechAudience.MATE_HANDLING) {
+                            applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+                            Toast.makeText(MainActivity.this, "共識已更新，繼續對話", Toast.LENGTH_SHORT).show();
+                            status("External live", green);
                         }
                         renderSession(session);
                     }
@@ -1025,7 +1027,13 @@ public class MainActivity extends Activity {
             privateSectionTitle.setVisibility(View.GONE);
             privateScroll.setVisibility(View.GONE);
 
-            modeActions.setVisibility(active && taskIsReady && !privateEditing
+            boolean showAlignmentAction = active && !privateEditing
+                    && !publicConversation
+                    && session.status() != CommunicationSession.Status.COMPLETED;
+            modeActions.setVisibility((showAlignmentAction
+                    || session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                    || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    || speechAudience == SpeechAudience.USER_DIRECT)
                     ? View.VISIBLE : View.GONE);
             utilities.setVisibility(active
                     && session.status() == CommunicationSession.Status.COMPLETED
@@ -1172,7 +1180,7 @@ public class MainActivity extends Activity {
 
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             boolean supplement = privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE;
-            primaryButton.setText(supplement ? "完成補充，回到對話" : "交代完成");
+            primaryButton.setText(supplement ? "完成補充 · 請 Mate 更新共識" : "我交代完了 · 請 Mate 整理");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             composerLabel.setText(supplement
@@ -1182,8 +1190,8 @@ public class MainActivity extends Activity {
                     ? "輸入你要新增的條件或資訊"
                     : "也可以繼續輸入補充內容");
             taskVoiceButton.setText(supplement
-                    ? "✓  補充完畢，回到對話"
-                    : "✓  我交代完了");
+                    ? "✓  補充完畢 · 更新共識"
+                    : "✓  我交代完了 · 整理共識");
             taskInputButton.setText(supplement
                     ? "送出 context 並回到對話"
                     : "送出文字");
@@ -1210,7 +1218,7 @@ public class MainActivity extends Activity {
             primaryButton.setText("第 2 步 · 讓 Mate 跟 " + person + " 說");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else {
-            primaryButton.setText("繼續");
+            primaryButton.setText("✓ 我交代完了 · 請 Mate 整理");
             primaryButton.setBackground(roundRect(accent, 11));
         }
 
