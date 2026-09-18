@@ -1,6 +1,5 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.InPersonMessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
@@ -35,8 +34,7 @@ public class SpeechAudienceBoundaryTest {
     public void typedPrivateBriefWorksWhileMicIsOff() {
         CommunicationSession session = new CommunicationSession();
         RecordingModelSession model = new RecordingModelSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, model, new InPersonMessagingBackend(), noOpRuntimeListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpRuntimeListener());
         runtime.setSpeechAudience(SpeechAudience.MATE_HANDLING);
         runtime.start();
 
@@ -52,8 +50,7 @@ public class SpeechAudienceBoundaryTest {
     @Test
     public void privateTranscriptRoutesUserToMate() {
         CommunicationSession session = new CommunicationSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, new RecordingModelSession(), new InPersonMessagingBackend(), noOpRuntimeListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, new RecordingModelSession(), noOpRuntimeListener());
         runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
 
         runtime.recordUserTranscript("最多接受 500 泰銖");
@@ -68,8 +65,7 @@ public class SpeechAudienceBoundaryTest {
     public void externalTranscriptRoutesOtherPersonToMate() {
         CommunicationSession session = new CommunicationSession();
         session.setTarget("front-desk", "Front desk");
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, new RecordingModelSession(), new InPersonMessagingBackend(), noOpRuntimeListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, new RecordingModelSession(), noOpRuntimeListener());
         runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
 
         runtime.recordExternalSpeechTranscript("Late checkout is 500 baht.");
@@ -85,8 +81,7 @@ public class SpeechAudienceBoundaryTest {
         CommunicationSession session = new CommunicationSession();
         session.setTarget("front-desk", "Front desk");
         RecordingModelSession model = new RecordingModelSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, model, new InPersonMessagingBackend(), noOpRuntimeListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpRuntimeListener());
         runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
         runtime.start();
 
@@ -102,8 +97,7 @@ public class SpeechAudienceBoundaryTest {
         CommunicationSession session = new CommunicationSession();
         session.setTarget("front-desk", "Front desk");
         RecordingModelSession model = new RecordingModelSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, model, new InPersonMessagingBackend(), noOpRuntimeListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpRuntimeListener());
         runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
         runtime.start();
 
@@ -126,8 +120,7 @@ public class SpeechAudienceBoundaryTest {
         CommunicationSession session = new CommunicationSession();
         session.setTarget("front-desk", "Front desk");
         RecordingModelSession model = new RecordingModelSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, model, new InPersonMessagingBackend(), noOpRuntimeListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpRuntimeListener());
         runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
         runtime.start();
 
@@ -147,8 +140,7 @@ public class SpeechAudienceBoundaryTest {
     @Test
     public void userDirectControlPreventsPrivateInput() {
         CommunicationSession session = new CommunicationSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, new RecordingModelSession(), new InPersonMessagingBackend(), noOpRuntimeListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, new RecordingModelSession(), noOpRuntimeListener());
         session.setUserDirectControl(true);
         runtime.setSpeechAudience(SpeechAudience.USER_DIRECT);
 
