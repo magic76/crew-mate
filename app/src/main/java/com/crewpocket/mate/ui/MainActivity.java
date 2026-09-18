@@ -1694,10 +1694,12 @@ public class MainActivity extends Activity {
             boolean showAlignmentAction = active && !privateEditing
                     && !stageTwo
                     && session.status() != CommunicationSession.Status.COMPLETED;
-            modeActions.setVisibility((showAlignmentAction
+            boolean showActions = showAlignmentAction
                     || needsDecision
                     || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    || speechAudience == SpeechAudience.USER_DIRECT)
+                    || speechAudience == SpeechAudience.USER_DIRECT;
+            modeActions.setVisibility(showActions ? View.VISIBLE : View.GONE);
+            bottomActionSpacer.setVisibility(showActions && !showExternalTimeline
                     ? View.VISIBLE : View.GONE);
             utilities.setVisibility(active
                     && session.status() == CommunicationSession.Status.COMPLETED
@@ -1718,6 +1720,8 @@ public class MainActivity extends Activity {
                     && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
             audienceCard.setVisibility(View.VISIBLE);
             modeActions.setVisibility(active ? View.VISIBLE : View.GONE);
+            bottomActionSpacer.setVisibility(active && !publicConversation
+                    ? View.VISIBLE : View.GONE);
             utilities.setVisibility(active ? View.VISIBLE : View.GONE);
         }
 
@@ -1731,6 +1735,7 @@ public class MainActivity extends Activity {
             taskVoiceButton.setText("🎙  口頭交代");
             audienceCard.setVisibility(View.GONE);
             modeActions.setVisibility(View.GONE);
+            bottomActionSpacer.setVisibility(View.GONE);
             utilities.setVisibility(View.GONE);
             transcriptModeButton.setVisibility(View.GONE);
             renderAudience(null);
