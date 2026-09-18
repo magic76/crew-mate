@@ -272,3 +272,17 @@ Stage one is a real private voice conversation between the user and Mate, not a 
 - if Mate needs more information, `request_user_input` still records the question in product state, but Mate must also say the same question aloud in the user's language.
 - typed briefs also enter the private voice channel so Mate can answer aloud.
 - only when task consensus becomes ready does the UI leave `PRIVATE_TO_MATE` and move to the silent confirmation screen before stage two.
+
+
+## History and task completion
+
+The **紀錄** entry is always available in the top bar. It can be opened while a Live conversation is active; opening history does not replace or interrupt the current task.
+
+Each history item shows its status, target, goal, constraints, escalation boundary, payment policy when relevant, outcome, and stored conversation messages.
+
+Task completion is distinct from stopping Live audio:
+
+- Mate calls `complete_task` only when the agreed goal has actually been reached. These records use completion source `MATE`.
+- Tapping **結束** lets the user choose **任務已完成** or **只結束 AI 通話**.
+- **任務已完成** marks the task `COMPLETED` with completion source `USER`.
+- **只結束 AI 通話** closes the Live connection but leaves the task resumable / stopped rather than claiming success.
