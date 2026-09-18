@@ -4,12 +4,14 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import com.crewpocket.mate.model.AudioOutputMode;
+import com.crewpocket.mate.model.InterfaceLanguage;
 
 public final class AppConfig {
     private static final String PREFS = "crew_mate";
     private static final String KEY_GEMINI_API_KEY = "gemini_api_key";
     private static final String KEY_VOICE = "voice";
     private static final String KEY_AUDIO_OUTPUT_MODE = "audio_output_mode";
+    private static final String KEY_INTERFACE_LANGUAGE = "interface_language";
 
     private AppConfig() {}
 
@@ -41,6 +43,20 @@ public final class AppConfig {
     public static void setAudioOutputMode(Context context, AudioOutputMode mode) {
         AudioOutputMode safe = mode == null ? AudioOutputMode.MEDIA : mode;
         prefs(context).edit().putString(KEY_AUDIO_OUTPUT_MODE, safe.name()).apply();
+    }
+
+    public static InterfaceLanguage getInterfaceLanguage(Context context) {
+        String value = prefs(context).getString(KEY_INTERFACE_LANGUAGE, InterfaceLanguage.ZH.name());
+        try {
+            return InterfaceLanguage.valueOf(value);
+        } catch (Exception ignored) {
+            return InterfaceLanguage.ZH;
+        }
+    }
+
+    public static void setInterfaceLanguage(Context context, InterfaceLanguage language) {
+        InterfaceLanguage safe = language == null ? InterfaceLanguage.ZH : language;
+        prefs(context).edit().putString(KEY_INTERFACE_LANGUAGE, safe.name()).apply();
     }
 
     private static String clean(String value) {

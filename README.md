@@ -375,3 +375,16 @@ While Gemini Live is `CONNECTING` or `ACTIVE`, Crew Mate applies Android's
 - when the call becomes `OFF` or `ERROR`, the flag is cleared and the device returns to its normal sleep policy
 - no WakeLock permission is required
 - the user can still lock the phone manually with the power button
+
+
+## Interface language
+
+Crew Mate has an app-level interface language setting independent from conversation languages.
+
+Settings -> Interface language:
+- 中文
+- English
+
+Changing the interface language updates navigation, task setup, live-call controls, task consensus, history, dialogs, status text, transcript controls, and completion actions. The Activity recreates after saving a changed interface language so all programmatic UI strings switch consistently.
+
+This does not change `USER_LANGUAGE` or `OTHER_PERSON_LANGUAGE`; those continue to control the actual spoken conversation.
