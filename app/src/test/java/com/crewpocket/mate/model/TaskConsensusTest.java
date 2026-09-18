@@ -35,6 +35,25 @@ public class TaskConsensusTest {
     }
 
     @Test
+    public void consensusStoresPaymentDecisionPolicy() {
+        CommunicationSession session = new CommunicationSession();
+
+        session.setConsensus(
+                "local-cashier",
+                "Cashier",
+                "Pay for the purchase",
+                "",
+                "Ask before changing payment method",
+                "Credit card",
+                "",
+                true);
+
+        assertEquals("Credit card", session.paymentPreference());
+        assertEquals("", session.paymentFallback());
+        assertTrue(session.consensusReady());
+    }
+
+    @Test
     public void consensusReadyRequiresTargetAndGoal() {
         CommunicationSession session = new CommunicationSession();
 
