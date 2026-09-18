@@ -21,6 +21,8 @@ public final class CommunicationSession {
     private String goal = "";
     private String constraints = "";
     private String escalationBoundary = "";
+    private String paymentPreference = "";
+    private String paymentFallback = "";
     private boolean consensusReady;
     private String outcomeSummary = "";
     private String userLanguage = "AUTO";
@@ -42,6 +44,8 @@ public final class CommunicationSession {
     public synchronized String goal() { return goal; }
     public synchronized String constraints() { return constraints; }
     public synchronized String escalationBoundary() { return escalationBoundary; }
+    public synchronized String paymentPreference() { return paymentPreference; }
+    public synchronized String paymentFallback() { return paymentFallback; }
     public synchronized boolean consensusReady() { return consensusReady; }
     public synchronized String outcomeSummary() { return outcomeSummary; }
     public synchronized String userLanguage() { return userLanguage; }
@@ -59,15 +63,24 @@ public final class CommunicationSession {
 
     public synchronized void setGoal(String value) { goal = clean(value); touch(); }
     public synchronized void setConsensus(String targetId, String targetDisplayName, String goalValue,
-                                          String constraintsValue, String escalationValue, boolean ready) {
+                                          String constraintsValue, String escalationValue,
+                                          String paymentPreferenceValue, String paymentFallbackValue,
+                                          boolean ready) {
         targetPersonId = clean(targetId);
         targetPerson = clean(targetDisplayName);
         goal = clean(goalValue);
         constraints = clean(constraintsValue);
         escalationBoundary = clean(escalationValue);
+        paymentPreference = clean(paymentPreferenceValue);
+        paymentFallback = clean(paymentFallbackValue);
         consensusReady = ready && !targetPerson.isEmpty() && !goal.isEmpty();
         touch();
     }
+    public synchronized void setConsensus(String targetId, String targetDisplayName, String goalValue,
+                                          String constraintsValue, String escalationValue, boolean ready) {
+        setConsensus(targetId, targetDisplayName, goalValue, constraintsValue, escalationValue, "", "", ready);
+    }
+
     public synchronized void setOutcomeSummary(String value) { outcomeSummary = clean(value); touch(); }
     public synchronized void setLanguages(String userValue, String otherValue) {
         userLanguage = language(userValue);

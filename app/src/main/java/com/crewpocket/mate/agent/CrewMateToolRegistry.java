@@ -37,12 +37,15 @@ public final class CrewMateToolRegistry {
                 String goal = arg(call, "goal");
                 String constraints = arg(call, "constraints");
                 String escalationBoundary = arg(call, "escalation_boundary");
+                String paymentPreference = arg(call, "payment_preference");
+                String paymentFallback = arg(call, "payment_fallback");
                 boolean ready = boolArg(call, "ready");
 
                 String personId = target.isEmpty()
                         ? ""
                         : "local-" + target.toLowerCase(Locale.US).replace(' ', '-');
-                session.setConsensus(personId, target, goal, constraints, escalationBoundary, ready);
+                session.setConsensus(personId, target, goal, constraints, escalationBoundary,
+                        paymentPreference, paymentFallback, ready);
                 session.setOutcomeSummary("");
                 session.setUserDirectControl(false);
                 if (ready) session.setPendingUserQuestion("");
@@ -55,6 +58,8 @@ public final class CrewMateToolRegistry {
                 payload.put("goal", session.goal());
                 payload.put("constraints", session.constraints());
                 payload.put("escalation_boundary", session.escalationBoundary());
+                payload.put("payment_preference", session.paymentPreference());
+                payload.put("payment_fallback", session.paymentFallback());
                 payload.put("ready", session.consensusReady());
                 completion.complete(ToolResult.success(call.id(), payload));
             }

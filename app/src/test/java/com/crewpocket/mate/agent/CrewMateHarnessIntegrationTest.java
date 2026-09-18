@@ -100,6 +100,38 @@ public class CrewMateHarnessIntegrationTest {
     }
 
     @Test
+    public void taskConsensusStoresPaymentPreferenceAndFallbackPolicy() {
+        CommunicationSession session = new CommunicationSession();
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
+
+        Map<String, Object> args = new LinkedHashMap<String, Object>();
+        args.put("target", "Restaurant cashier");
+        args.put("goal", "Pay the bill");
+        args.put("constraints", "");
+        args.put("escalation_boundary", "Ask me if the requested payment method changes");
+        args.put("payment_preference", "Credit card");
+        args.put("payment_fallback", "");
+        args.put("ready", true);
+
+        ToolResult result = execute(tools.registry(),
+                call("payment", "update_task_consensus", args));
+
+        assertTrue(result.success());
+        assertEquals("Credit card", session.paymentPreference());
+        assertEquals("", session.paymentFallback());
+        assertTrue(session.consensusReady());
+    }
+
+    @Test
+    public void agentPromptEscalatesUnapprovedPaymentMethodChanges() {
+        String prompt = new CrewMateAgentSpec().systemPrompt();
+
+        assertTrue(prompt.contains("cash only"));
+        assertTrue(prompt.contains("request_user_input"));
+        assertTrue(prompt.contains("payment"));
+    }
+
+    @Test
     public void incompleteConsensusCannotBecomeReadyWithoutTargetAndGoal() {
         CommunicationSession session = new CommunicationSession();
         session.setConsensus("", "", "", "No extra charge", "Ask me if payment is required", true);

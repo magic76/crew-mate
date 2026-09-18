@@ -79,6 +79,7 @@ public class MainActivity extends Activity {
 
     private Button primaryButton;
     private Button directButton;
+    private Button endConversationButton;
     private Button settingsButton;
     private LinearLayout callBar;
     private TextView callStateText;
@@ -378,6 +379,17 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams directLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
         directLp.setMargins(dp(8), 0, 0, 0);
         modeActions.addView(directButton, directLp);
+
+        endConversationButton = actionButton("結束", Color.rgb(127, 29, 29));
+        endConversationButton.setTextSize(12);
+        endConversationButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (runtime != null) stopRuntime();
+            }
+        });
+        LinearLayout.LayoutParams endLp = new LinearLayout.LayoutParams(0, dp(52), 0.72f);
+        endLp.setMargins(dp(8), 0, 0, 0);
+        modeActions.addView(endConversationButton, endLp);
         root.addView(modeActions);
 
         utilities = new LinearLayout(this);
@@ -1007,37 +1019,45 @@ public class MainActivity extends Activity {
                 || speechAudience == SpeechAudience.USER_DIRECT || hasExternalMessages(session));
 
         if (inPerson) {
-            // Physical handoff has three product screens: setup -> confirm -> conversation.
-            statusText.setVisibility(active && (publicConversation
-                    || session.status() == CommunicationSession.Status.NEEDS_USER_INPUT)
-                    ? View.VISIBLE : View.GONE);
-            taskComposerCard.setVisibility((!active || !taskIsReady || privateEditing)
-                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
-            audienceCard.setVisibility(privateEditing
-                    || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    || speechAudience == SpeechAudience.USER_DIRECT
-                    || (active && session.status() == CommunicationSession.Status.NEEDS_USER_INPUT)
-                    || (active && taskIsReady) ? View.VISIBLE : View.GONE);
+            // Stage 1 is task alignment. Stage 2 makes the live external dialogue the visual focus.
+            boolean stageTwo = publicConversation && !privateEditing;
+            boolean needsDecision = active
+                    && session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                    && !session.pendingUserQuestion().isEmpty();
 
-            boolean showExternalTimeline = active && publicConversation && !privateEditing;
+            // Audience/decision card owns in-person state; avoid stacking another status banner.
+            statusText.setVisibility(View.GONE);
+            taskComposerCard.setVisibility((!active || (!taskIsReady && !stageTwo) || privateEditing)
+                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+
+            // The large audience card is useful for setup/decisions, but wastes space during live dialogue.
+            audienceCard.setVisibility(privateEditing
+                    || speechAudience == SpeechAudience.USER_DIRECT
+                    || needsDecision
+                    || (active && taskIsReady && !stageTwo)
+                    ? View.VISIBLE : View.GONE);
+
+            boolean showExternalTimeline = active && stageTwo;
             externalSectionTitle.setVisibility(showExternalTimeline ? View.VISIBLE : View.GONE);
             externalScroll.setVisibility(showExternalTimeline ? View.VISIBLE : View.GONE);
 
-            // Private turns remain persisted, but the normal flow does not compete with a second timeline.
             privateSectionTitle.setVisibility(View.GONE);
             privateScroll.setVisibility(View.GONE);
 
             boolean showAlignmentAction = active && !privateEditing
-                    && !publicConversation
+                    && !stageTwo
                     && session.status() != CommunicationSession.Status.COMPLETED;
             modeActions.setVisibility((showAlignmentAction
-                    || session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                    || needsDecision
                     || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
                     || speechAudience == SpeechAudience.USER_DIRECT)
                     ? View.VISIBLE : View.GONE);
             utilities.setVisibility(active
                     && session.status() == CommunicationSession.Status.COMPLETED
                     ? View.VISIBLE : View.GONE);
+
+            // During stage 2 keep only the call state + end action in the top bar.
+            languageButton.setVisibility(stageTwo ? View.GONE : View.VISIBLE);
         } else {
             statusText.setVisibility(active ? View.VISIBLE : View.GONE);
             externalSectionTitle.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
@@ -1071,33 +1091,50 @@ public class MainActivity extends Activity {
         String goal = session.goal().isEmpty() ? "尚未確認" : session.goal();
         String constraints = session.constraints().isEmpty() ? "尚未設定" : session.constraints();
         String boundary = session.escalationBoundary().isEmpty() ? "尚未設定" : session.escalationBoundary();
+        String paymentPreference = session.paymentPreference().isEmpty() ? "未指定" : session.paymentPreference();
+        String paymentFallback = session.paymentFallback().isEmpty()
+                ? "未授權替代方式；不同付款方式要先問你"
+                : session.paymentFallback();
         StringBuilder task = new StringBuilder();
 
-        task.append("本次任務共識")
-                .append(taskIsReady ? "  ✓ 已對齊" : "  · 尚未完成")
-                .append("\n\n對象：").append(person)
-                .append("\n目的：").append(goal)
-                .append("\n限制／條件：").append(constraints)
-                .append("\n需要回來問你：").append(boundary)
-                .append("\n語言：").append(languageLabel(selectedUserLanguage))
-                .append(" → ").append(languageLabel(selectedOtherLanguage));
+        if (publicConversation && !privateEditing) {
+            task.append("Mate ↔ ").append(person)
+                    .append("  ·  ").append(languageLabel(selectedOtherLanguage))
+                    .append("\n目的：").append(goal);
+            if (!session.paymentPreference().isEmpty()) {
+                task.append("\n付款：").append(paymentPreference);
+            }
+            taskText.setTextSize(13);
+            taskText.setBackground(roundRect(surface2, 12));
+        } else {
+            task.append("本次任務共識")
+                    .append(taskIsReady ? "  ✓ 已對齊" : "  · 尚未完成")
+                    .append("\n\n對象：").append(person)
+                    .append("\n目的：").append(goal)
+                    .append("\n限制／條件：").append(constraints)
+                    .append("\n付款方式：").append(paymentPreference)
+                    .append("\n付款替代：").append(paymentFallback)
+                    .append("\n需要回來問你：").append(boundary)
+                    .append("\n語言：").append(languageLabel(selectedUserLanguage))
+                    .append(" → ").append(languageLabel(selectedOtherLanguage));
+            taskText.setTextSize(taskIsReady ? 15 : 14);
+            taskText.setBackground(roundRect(surface, 18));
+        }
 
-        if (!session.pendingUserQuestion().isEmpty()) {
+        if (!session.pendingUserQuestion().isEmpty() && !publicConversation) {
             task.append("\n\nMate 想確認：").append(session.pendingUserQuestion());
         }
-        if (publicConversation) {
-            task.append("\n\n目前：正在跟 ").append(person).append(" 對話");
-        }
-        taskText.setTextSize(taskIsReady ? 15 : 14);
 
         if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會聽，也不會說話。");
-        if (!session.pendingUserQuestion().isEmpty()) task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
+        if (!session.pendingUserQuestion().isEmpty() && !publicConversation) {
+            task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
+        }
         if (!session.outcomeSummary().isEmpty()) task.append("\n\n結果：").append(session.outcomeSummary());
 
         taskText.setText(task.toString());
         taskText.setVisibility(View.VISIBLE);
         externalSectionTitle.setText(inPerson
-                ? "對話 · Mate ↔ " + person
+                ? "即時對話"
                 : "對外紀錄 · Mate ↔ " + person);
         privateSectionTitle.setText("🔒 私人 · 你 ↔ Mate");
         renderTimelines(session, person);
@@ -1117,10 +1154,9 @@ public class MainActivity extends Activity {
                     ? "現在只有 Mate 在聽。這段會加入你的私人 context，不會直接說給對方。"
                     : "現在只有 Mate 在聽。把你想做的事、對象和限制說清楚即可。");
         } else if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
-            styleAudience(Color.rgb(18, 56, 48), green);
-            audienceTitle.setText("Mate 正在跟 " + person + " 對話");
-            audienceDetail.setText("對方語言：" + languageLabel(selectedOtherLanguage)
-                    + "。現在麥克風是給對方說話；若要新增條件，請先按「補充 context」。");
+            styleAudience(surface2, green);
+            audienceTitle.setText("● Mate ↔ " + person);
+            audienceDetail.setText("需要新增條件時按「補充 context」。");
         } else if (speechAudience == SpeechAudience.USER_DIRECT) {
             styleAudience(Color.rgb(83, 45, 20), direct);
             audienceTitle.setText("你已接手對話");
@@ -1158,6 +1194,7 @@ public class MainActivity extends Activity {
             primaryButton.setText("開始");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
+            endConversationButton.setVisibility(View.GONE);
             composerLabel.setText("先告訴 Mate 你想做什麼");
             taskVoiceButton.setText("🎙  口頭交代");
             taskInputButton.setText("交代給 Mate");
@@ -1168,6 +1205,7 @@ public class MainActivity extends Activity {
             primaryButton.setText("建立新任務");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
+            endConversationButton.setVisibility(View.GONE);
             return;
         }
 
@@ -1175,6 +1213,7 @@ public class MainActivity extends Activity {
             primaryButton.setText("讓 Mate 繼續");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
             directButton.setVisibility(View.GONE);
+            endConversationButton.setVisibility(View.VISIBLE);
             return;
         }
 
@@ -1183,6 +1222,7 @@ public class MainActivity extends Activity {
             primaryButton.setText(supplement ? "完成補充 · 請 Mate 更新共識" : "我交代完了 · 請 Mate 整理");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
+            endConversationButton.setVisibility(View.GONE);
             composerLabel.setText(supplement
                     ? "補充 context 給 Mate"
                     : "把需求交代給 Mate");
@@ -1202,17 +1242,19 @@ public class MainActivity extends Activity {
         taskInputButton.setText("送出文字");
 
         if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
-            primaryButton.setText("＋ 補充 context");
+            primaryButton.setText("＋ 補充");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.VISIBLE);
             directButton.setText("我要自己說");
             directButton.setBackground(roundRect(direct, 11));
+            endConversationButton.setVisibility(View.VISIBLE);
             return;
         }
 
         if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
             primaryButton.setText("回答 Mate 的問題");
             primaryButton.setBackground(roundRect(accent, 11));
+            endConversationButton.setVisibility(hasExternalMessages(session) ? View.VISIBLE : View.GONE);
         } else if (isInPersonMode() && taskReady(session)) {
             String person = session.targetPerson().isEmpty() ? "對方" : session.targetPerson();
             primaryButton.setText("第 2 步 · 讓 Mate 跟 " + person + " 說");
@@ -1223,6 +1265,9 @@ public class MainActivity extends Activity {
         }
 
         boolean canSupplement = isInPersonMode() && taskReady(session);
+        if (session.status() != CommunicationSession.Status.NEEDS_USER_INPUT) {
+            endConversationButton.setVisibility(View.GONE);
+        }
         directButton.setVisibility(canSupplement ? View.VISIBLE : View.GONE);
         directButton.setText(publicConversationActive() ? "我要自己說" : "補充 context");
         directButton.setBackground(roundRect(publicConversationActive() ? direct : surface2, 11));

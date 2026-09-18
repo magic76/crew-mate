@@ -88,6 +88,8 @@ public final class SessionStore {
         root.put("goal", session.goal());
         root.put("constraints", session.constraints());
         root.put("escalation_boundary", session.escalationBoundary());
+        root.put("payment_preference", session.paymentPreference());
+        root.put("payment_fallback", session.paymentFallback());
         root.put("consensus_ready", session.consensusReady());
         root.put("outcome_summary", session.outcomeSummary());
         root.put("user_language", session.userLanguage());
@@ -122,6 +124,8 @@ public final class SessionStore {
                     root.optString("goal"),
                     root.optString("constraints"),
                     root.optString("escalation_boundary"),
+                    root.optString("payment_preference"),
+                    root.optString("payment_fallback"),
                     root.optBoolean("consensus_ready", false));
             session.setOutcomeSummary(root.optString("outcome_summary"));
             session.setLanguages(
