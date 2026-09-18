@@ -547,6 +547,7 @@ public class MainActivity extends Activity {
     }
 
     private void applySelectedLanguages() {
+        synchronized (translationAttempted) { translationAttempted.clear(); }
         if (viewedSession != null) {
             viewedSession.setLanguages(selectedUserLanguage, selectedOtherLanguage);
             sessionStore.save(viewedSession);
@@ -1506,6 +1507,7 @@ public class MainActivity extends Activity {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         AppConfig.setApiKey(MainActivity.this, api.getText().toString());
                         translationService = new GeminiTranslationService(AppConfig.getApiKey(MainActivity.this));
+                        synchronized (translationAttempted) { translationAttempted.clear(); }
                         renderSession(viewedSession);
                     }
                 })
