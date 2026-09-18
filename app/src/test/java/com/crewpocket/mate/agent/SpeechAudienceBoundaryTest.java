@@ -95,7 +95,7 @@ public class SpeechAudienceBoundaryTest {
     }
 
     @Test
-    public void externalModelOutputRoutesMateToOtherPerson() {
+    public void externalModelOutputWithoutRealExternalSpeechIsDiscarded() {
         CommunicationSession session = new CommunicationSession();
         session.setTarget("front-desk", "Front desk");
         RecordingModelSession model = new RecordingModelSession();
@@ -104,13 +104,61 @@ public class SpeechAudienceBoundaryTest {
         runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
         runtime.start();
 
+        model.emit(ModelEvent.text("The front desk says late checkout costs 500 baht."));
+        model.emit(ModelEvent.turnCompleted());
+
+        assertTrue(session.messages().isEmpty());
+
+        runtime.close();
+        backend.shutdown();
+    }
+
+    @Test
+    public void externalModelOutputRoutesMateOnlyAfterOtherPersonActuallySpeaks() {
+        CommunicationSession session = new CommunicationSession();
+        session.setTarget("front-desk", "Front desk");
+        RecordingModelSession model = new RecordingModelSession();
+        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, noOpRuntimeListener());
+        runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+        runtime.start();
+
+        runtime.recordExternalSpeechTranscript("Late checkout is 500 baht.");
         model.emit(ModelEvent.text("Could you make it 300 baht?"));
         model.emit(ModelEvent.turnCompleted());
 
-        Message message = onlyMessage(session.messages());
-        assertEquals(Message.Sender.MATE, message.sender);
-        assertEquals("Front desk", message.recipient);
-        assertEquals("Could you make it 300 baht?", message.content());
+        List<Message> messages = session.messages();
+        assertEquals(2, messages.size());
+        assertEquals(Message.Sender.OTHER_PERSON, messages.get(0).sender);
+        assertEquals("Late checkout is 500 baht.", messages.get(0).content());
+        assertEquals(Message.Sender.MATE, messages.get(1).sender);
+        assertEquals("Front desk", messages.get(1).recipient);
+        assertEquals("Could you make it 300 baht?", messages.get(1).content());
+
+        runtime.close();
+        backend.shutdown();
+    }
+
+    @Test
+    public void reenteringExternalModeRequiresFreshExternalSpeech() {
+        CommunicationSession session = new CommunicationSession();
+        session.setTarget("front-desk", "Front desk");
+        RecordingModelSession model = new RecordingModelSession();
+        FakeMessagingBackend backend = new FakeMessagingBackend(0L);
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, backend, noOpRuntimeListener());
+        runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+        runtime.start();
+
+        runtime.recordExternalSpeechTranscript("500 baht.");
+        model.emit(ModelEvent.text("I will check with the guest."));
+        model.emit(ModelEvent.turnCompleted());
+
+        runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
+        runtime.setSpeechAudience(SpeechAudience.EXTERNAL_WITH_MATE);
+        model.emit(ModelEvent.text("The front desk now says 300 baht."));
+        model.emit(ModelEvent.turnCompleted());
+
+        assertEquals(2, session.messages().size());
 
         runtime.close();
         backend.shutdown();
