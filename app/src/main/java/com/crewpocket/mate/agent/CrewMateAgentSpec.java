@@ -13,7 +13,7 @@ public final class CrewMateAgentSpec implements AgentSpec {
             new ToolSpec(
                     "update_task_consensus",
                     "Update the shared task consensus between the user and Mate. Mark ready=true only when Mate has enough information to safely start the external conversation.",
-                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\"},\"goal\":{\"type\":\"string\"},\"constraints\":{\"type\":\"string\"},\"escalation_boundary\":{\"type\":\"string\"},\"ready\":{\"type\":\"boolean\"}},\"required\":[\"target\",\"goal\",\"ready\"]}"),
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\"},\"goal\":{\"type\":\"string\"},\"constraints\":{\"type\":\"string\"},\"escalation_boundary\":{\"type\":\"string\"},\"ready\":{\"type\":\"boolean\"}},\"required\":[\"ready\"]}"),
             new ToolSpec(
                     "request_user_input",
                     "Return privately to the user only when a new decision or missing information prevents Mate from continuing safely.",
@@ -32,7 +32,7 @@ public final class CrewMateAgentSpec implements AgentSpec {
                 + "The user first briefs you privately, then hands the phone to another person so you can talk with that person through Gemini Live.\n\n"
                 + "FLOW:\n"
                 + "- Phase 1 is ALIGNMENT, not execution. The user describes the need by voice or text. Build a shared task consensus before any external conversation.\n"
-                + "- After each private user turn, update the current understanding with update_task_consensus. Include target, goal, constraints, and the boundary for when you must come back to the user.\n"
+                + "- After each private user turn, update the current understanding with update_task_consensus, even if it is incomplete. Unknown fields may be empty and will appear as not yet confirmed in the visible consensus card. Include whatever is currently understood about target, goal, constraints, and the boundary for when you must come back to the user.\n"
                 + "- Do NOT mark consensus ready just because target + goal are present. If a missing detail could materially change what you say, what you may agree to, price/time limits, or what outcome counts as success, ask the user one concise clarification question with request_user_input. Multiple clarification rounds are allowed.\n"
                 + "- Mark ready=true only when the target and goal are clear and any material constraints/decision boundaries are either known or genuinely unnecessary. The visible consensus card is the contract between the user and Mate.\n"
                 + "- When the user later adds PRIVATE_TO_MATE context, update the same consensus rather than creating a separate task understanding. If the new context creates ambiguity, ready may become false until clarified.\n"
