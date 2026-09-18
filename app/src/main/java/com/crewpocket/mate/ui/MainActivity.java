@@ -28,6 +28,7 @@ import android.widget.Toast;
 
 import com.crewpocket.mate.agent.CrewMateRuntime;
 import com.crewpocket.mate.config.AppConfig;
+import com.crewpocket.mate.model.AudioOutputMode;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.LiveCallState;
 import com.crewpocket.mate.model.Message;
@@ -84,6 +85,7 @@ public class MainActivity extends Activity {
     private LinearLayout callBar;
     private TextView callStateText;
     private Button languageButton;
+    private Button audioOutputButton;
     private Button callToggleButton;
     private TextView statusText;
     private TextView taskText;
@@ -119,6 +121,7 @@ public class MainActivity extends Activity {
     private String pendingTypedBrief = "";
     private String selectedUserLanguage = "AUTO";
     private String selectedOtherLanguage = "AUTO";
+    private AudioOutputMode audioOutputMode = AudioOutputMode.MEDIA;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -127,6 +130,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(bg);
         sessionStore = new SessionStore(this);
         selectedUserLanguage = defaultUserLanguage();
+        audioOutputMode = AppConfig.getAudioOutputMode(this);
         setContentView(buildUi());
         restoreRequestedOrLatest(getIntent());
     }
@@ -257,6 +261,15 @@ public class MainActivity extends Activity {
         languageLp.setMargins(dp(6), 0, dp(6), 0);
         callBar.addView(languageButton, languageLp);
 
+        audioOutputButton = actionButton("🔊 媒體", surface2);
+        audioOutputButton.setTextSize(10);
+        audioOutputButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { toggleAudioOutputMode(); }
+        });
+        LinearLayout.LayoutParams outputLp = new LinearLayout.LayoutParams(dp(82), dp(38));
+        outputLp.setMargins(0, 0, dp(6), 0);
+        callBar.addView(audioOutputButton, outputLp);
+
         callToggleButton = actionButton("開啟", surface2);
         callToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { handleLiveCallToggle(); }
@@ -267,6 +280,7 @@ public class MainActivity extends Activity {
         callLp.setMargins(0, dp(12), 0, dp(10));
         root.addView(callBar, callLp);
         renderLanguageControl();
+        renderAudioOutputControl();
         renderLiveCallControl();
 
         statusText = new TextView(this);
@@ -543,6 +557,27 @@ public class MainActivity extends Activity {
         return "AUTO";
     }
 
+    private void toggleAudioOutputMode() {
+        audioOutputMode = audioOutputMode == AudioOutputMode.MEDIA
+                ? AudioOutputMode.COMMUNICATION
+                : AudioOutputMode.MEDIA;
+        AppConfig.setAudioOutputMode(this, audioOutputMode);
+        if (modelSession != null) {
+            modelSession.setAudioOutputMode(audioOutputMode);
+        }
+        renderAudioOutputControl();
+        Toast.makeText(this,
+                audioOutputMode == AudioOutputMode.MEDIA ? "聲音輸出：媒體" : "聲音輸出：通話",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    private void renderAudioOutputControl() {
+        if (audioOutputButton == null) return;
+        audioOutputButton.setText(audioOutputMode == AudioOutputMode.MEDIA
+                ? "🔊 媒體"
+                : "☎ 通話");
+    }
+
     private void handleLiveCallToggle() {
         if (liveCallState == LiveCallState.ACTIVE || liveCallState == LiveCallState.CONNECTING) {
             if (runtime != null) {
@@ -816,6 +851,7 @@ public class MainActivity extends Activity {
             }
         });
         modelSession.setConversationLanguages(selectedUserLanguage, selectedOtherLanguage);
+        modelSession.setAudioOutputMode(audioOutputMode);
         modelSession.setSpeechAudience(speechAudience);
 
         runtime = new CrewMateRuntime(liveSession, modelSession, new CrewMateRuntime.Listener() {
@@ -931,6 +967,7 @@ public class MainActivity extends Activity {
         if (taskInput != null) taskInput.setText("");
         setLiveCallState(LiveCallState.OFF);
         renderLanguageControl();
+        renderAudioOutputControl();
         renderSession(null);
         status("Ready", muted);
     }
@@ -1058,6 +1095,7 @@ public class MainActivity extends Activity {
 
             // During stage 2 keep only the call state + end action in the top bar.
             languageButton.setVisibility(stageTwo ? View.GONE : View.VISIBLE);
+            audioOutputButton.setVisibility(View.VISIBLE);
         } else {
             statusText.setVisibility(active ? View.VISIBLE : View.GONE);
             externalSectionTitle.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
