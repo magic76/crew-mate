@@ -108,6 +108,24 @@ public class CrewMateHarnessIntegrationTest {
     }
 
     @Test
+    public void partialConsensusCanBeShownBeforeClarificationCompletes() {
+        CommunicationSession session = new CommunicationSession();
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
+
+        Map<String, Object> args = new LinkedHashMap<String, Object>();
+        args.put("goal", "Ask whether late checkout is possible");
+        args.put("ready", false);
+
+        ToolResult result = execute(tools.registry(),
+                call("partial", "update_task_consensus", args));
+
+        assertTrue(result.success());
+        assertEquals("", session.targetPerson());
+        assertEquals("Ask whether late checkout is possible", session.goal());
+        assertFalse(session.consensusReady());
+    }
+
+    @Test
     public void requestUserInputStoresQuestion() {
         CommunicationSession session = new CommunicationSession();
         CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
