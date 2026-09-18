@@ -388,3 +388,49 @@ Settings -> Interface language:
 Changing the interface language updates navigation, task setup, live-call controls, task consensus, history, dialogs, status text, transcript controls, and completion actions. The Activity recreates after saving a changed interface language so all programmatic UI strings switch consistently.
 
 This does not change `USER_LANGUAGE` or `OTHER_PERSON_LANGUAGE`; those continue to control the actual spoken conversation.
+
+
+## Google Play internal testing release
+
+Crew Mate uses the same release pattern as Crew Teacher: a dedicated **Build Play AAB** GitHub Actions workflow creates the signed Play bundle.
+
+Current Play identity:
+
+- applicationId: `com.crewpocket.mate`
+- versionCode: `1`
+- versionName: `0.1.0`
+- version mirror: `version.txt`
+
+Release signing is loaded only when `keystore.properties` exists. The upload keystore itself must never be committed.
+
+### Required GitHub Actions secrets
+
+Configure these repository secrets before running the Play workflow:
+
+- `CREW_MATE_KEYSTORE_B64`
+- `CREW_MATE_KEYSTORE_PASSWORD`
+- `CREW_MATE_KEY_ALIAS`
+- `CREW_MATE_KEY_PASSWORD`
+
+`CREW_MATE_KEYSTORE_B64` is the base64-encoded Android upload keystore. Keep the original keystore backed up permanently; future Play uploads must continue using the same upload key unless the Play Console upload key is formally reset.
+
+### Build the Play bundle
+
+Run GitHub Actions -> **Build Play AAB** -> **Run workflow**.
+
+The workflow:
+
+1. installs JDK 17 and Android SDK 36
+2. restores the upload keystore only inside the Actions runner
+3. writes temporary `keystore.properties`
+4. runs unit tests
+5. builds signed `bundleRelease`
+6. uploads artifact `CrewMate-<ref>-release`
+
+The AAB file inside the artifact is:
+
+`app/build/outputs/bundle/release/app-release.aab`
+
+For the first internal-testing release, upload this AAB in Google Play Console -> Testing -> Internal testing -> Create new release.
+
+For every later Play release, increment `versionCode` and update `versionName` / `version.txt` before building another AAB.
