@@ -951,50 +951,102 @@ public class MainActivity extends Activity {
     private void renderSession(CommunicationSession session) {
         boolean active = session != null;
         boolean inPerson = isInPersonMode();
+        boolean privateEditing = speechAudience == SpeechAudience.PRIVATE_TO_MATE;
+        boolean taskIsReady = taskReady(session);
         boolean publicConversation = active && (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
                 || speechAudience == SpeechAudience.USER_DIRECT || hasExternalMessages(session));
-        externalSectionTitle.setVisibility(active && (!inPerson || publicConversation) ? View.VISIBLE : View.GONE);
-        externalScroll.setVisibility(active && (!inPerson || publicConversation) ? View.VISIBLE : View.GONE);
-        privateSectionTitle.setVisibility(active && (!inPerson || !publicConversation) ? View.VISIBLE : View.GONE);
-        privateScroll.setVisibility(active && (!inPerson || !publicConversation) ? View.VISIBLE : View.GONE);
-        taskComposerCard.setVisibility((!publicConversation || speechAudience == SpeechAudience.PRIVATE_TO_MATE)
-                && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+
+        if (inPerson) {
+            // Physical handoff has three product screens: setup -> confirm -> conversation.
+            statusText.setVisibility(active && (publicConversation
+                    || session.status() == CommunicationSession.Status.NEEDS_USER_INPUT)
+                    ? View.VISIBLE : View.GONE);
+            taskComposerCard.setVisibility((!active || !taskIsReady || privateEditing)
+                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+            audienceCard.setVisibility(privateEditing
+                    || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    || speechAudience == SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+
+            boolean showExternalTimeline = active && publicConversation && !privateEditing;
+            externalSectionTitle.setVisibility(showExternalTimeline ? View.VISIBLE : View.GONE);
+            externalScroll.setVisibility(showExternalTimeline ? View.VISIBLE : View.GONE);
+
+            // Private turns remain persisted, but the normal flow does not compete with a second timeline.
+            privateSectionTitle.setVisibility(View.GONE);
+            privateScroll.setVisibility(View.GONE);
+
+            modeActions.setVisibility(active && taskIsReady && !privateEditing
+                    ? View.VISIBLE : View.GONE);
+            utilities.setVisibility(active && !privateEditing
+                    && speechAudience != SpeechAudience.EXTERNAL_WITH_MATE
+                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+        } else {
+            statusText.setVisibility(active ? View.VISIBLE : View.GONE);
+            externalSectionTitle.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
+            externalScroll.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
+            privateSectionTitle.setVisibility(active && !publicConversation ? View.VISIBLE : View.GONE);
+            privateScroll.setVisibility(active && !publicConversation ? View.VISIBLE : View.GONE);
+            taskComposerCard.setVisibility((!publicConversation || privateEditing)
+                    && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+            audienceCard.setVisibility(View.VISIBLE);
+            modeActions.setVisibility(active ? View.VISIBLE : View.GONE);
+            utilities.setVisibility(active ? View.VISIBLE : View.GONE);
+        }
+
         if (!active) {
-            taskText.setText("第 1 步 · 設定任務\n\n直接說，或在下方打字告訴 Mate：你要跟誰溝通、想達成什麼、有哪些限制。");
-            taskInputButton.setText("用文字交代");
+            taskText.setVisibility(View.VISIBLE);
+            taskText.setText("你想讓 Mate 幫你處理什麼？\n\n跟誰說、想要什麼結果，有限制就一起講。");
+            taskText.setTextSize(20);
+            taskInputButton.setText("送出文字");
+            taskVoiceButton.setText("🎙  說給 Mate 聽");
             approvalCard.setVisibility(View.GONE);
+            audienceCard.setVisibility(View.GONE);
+            modeActions.setVisibility(View.GONE);
+            utilities.setVisibility(View.GONE);
             renderAudience(null);
             renderControls(null);
             return;
         }
 
         String person = session.targetPerson().isEmpty() ? "尚未確認" : session.targetPerson();
-        String goal = session.goal().isEmpty() ? "Mate 正在整理…" : session.goal();
-        String delegation;
-        if (isInPersonMode()) {
-            delegation = taskReady(session)
-                    ? "✓ Mate 已理解。下一步直接按「開始幫我談」，再把手機交給對方。"
-                    : "先把任務說完或打完，Mate 會整理出對象與目標。";
-        } else {
-            delegation = session.delegationAuthorized()
-                    ? "Mate 已接手一般往返；重要承諾仍會回來問你"
-                    : "第一則對外訊息會先讓你確認";
-        }
+        String goal = session.goal().isEmpty() ? "" : session.goal();
         StringBuilder task = new StringBuilder();
-        task.append("任務\n")
-                .append("對象：").append(person).append("\n")
-                .append("目標：").append(goal);
-        String brief = latestPrivateBrief(session);
-        if (!brief.isEmpty()) task.append("\n\n你的交代：").append(brief);
-        task.append("\n\n").append(delegation);
+
+        if (inPerson) {
+            if (publicConversation) {
+                task.append("正在跟 ").append(person).append(" 溝通");
+                if (!goal.isEmpty()) task.append("\n").append(goal);
+                taskText.setTextSize(14);
+            } else if (taskIsReady) {
+                task.append("Mate 已理解 ✓\n\n")
+                        .append("跟誰：").append(person).append("\n")
+                        .append("要做什麼：").append(goal);
+                taskText.setTextSize(17);
+            } else {
+                task.append("正在理解你的任務…");
+                String brief = latestPrivateBrief(session);
+                if (!brief.isEmpty()) task.append("\n\n").append(brief);
+                taskText.setTextSize(16);
+            }
+        } else {
+            task.append("任務\n")
+                    .append("對象：").append(person).append("\n")
+                    .append("目標：").append(goal.isEmpty() ? "Mate 正在整理…" : goal);
+            String brief = latestPrivateBrief(session);
+            if (!brief.isEmpty()) task.append("\n\n你的交代：").append(brief);
+            taskText.setTextSize(14);
+        }
+
         if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會自主送新訊息。");
         if (!session.pendingUserQuestion().isEmpty()) task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
         if (!session.outcomeSummary().isEmpty()) task.append("\n\n結果：").append(session.outcomeSummary());
+
         taskText.setText(task.toString());
-        externalSectionTitle.setText(isInPersonMode()
-                ? "第 2 步 · 對話紀錄 · Mate ↔ " + person
+        taskText.setVisibility(privateEditing ? View.GONE : View.VISIBLE);
+        externalSectionTitle.setText(inPerson
+                ? "對話 · Mate ↔ " + person
                 : "對外紀錄 · Mate ↔ " + person);
-        privateSectionTitle.setText("第 1 步 · 私人交代");
+        privateSectionTitle.setText("🔒 私人 · 你 ↔ Mate");
         renderTimelines(session, person);
 
         PendingApproval approval = session.pendingApproval();
