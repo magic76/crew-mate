@@ -1025,7 +1025,8 @@ public class MainActivity extends Activity {
                     && session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
                     && !session.pendingUserQuestion().isEmpty();
 
-            statusText.setVisibility(needsDecision ? View.VISIBLE : View.GONE);
+            // Audience/decision card owns in-person state; avoid stacking another status banner.
+            statusText.setVisibility(View.GONE);
             taskComposerCard.setVisibility((!active || (!taskIsReady && !stageTwo) || privateEditing)
                     && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
 
@@ -1125,7 +1126,9 @@ public class MainActivity extends Activity {
         }
 
         if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會聽，也不會說話。");
-        if (!session.pendingUserQuestion().isEmpty()) task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
+        if (!session.pendingUserQuestion().isEmpty() && !publicConversation) {
+            task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
+        }
         if (!session.outcomeSummary().isEmpty()) task.append("\n\n結果：").append(session.outcomeSummary());
 
         taskText.setText(task.toString());
