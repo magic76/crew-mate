@@ -80,6 +80,32 @@ public class SpeechAudienceBoundaryTest {
     }
 
     @Test
+    public void oneShotSupplementWaitsForCurrentAudioTurnBeforeForcedFinalize() {
+        CommunicationSession session = new CommunicationSession();
+        session.setConsensus(
+                "local-front-desk",
+                "Front desk",
+                "Ask for late checkout",
+                "",
+                "Ask before changing the agreed terms",
+                true);
+        RecordingModelSession model = new RecordingModelSession();
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpRuntimeListener());
+        runtime.setSpeechAudience(SpeechAudience.PRIVATE_TO_MATE);
+        runtime.start();
+
+        runtime.recordUserTranscript("Also ask whether breakfast can be included.");
+        runtime.finalizePrivateSupplementAfterCurrentTurn();
+
+        assertEquals("", model.lastUserText);
+
+        model.emit(ModelEvent.turnCompleted());
+
+        assertTrue(model.lastUserText.contains("PRODUCT_EVENT=FINALIZE_TASK_CONSENSUS"));
+        runtime.close();
+    }
+
+    @Test
     public void privateTextInvalidatesPreviouslyReadyConsensus() {
         CommunicationSession session = new CommunicationSession();
         session.setConsensus(
