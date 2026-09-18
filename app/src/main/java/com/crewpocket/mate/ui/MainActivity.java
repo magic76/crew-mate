@@ -613,7 +613,8 @@ public class MainActivity extends Activity {
     }
 
     private boolean taskReady(CommunicationSession session) {
-        return session != null && !session.targetPerson().isEmpty() && !session.goal().isEmpty();
+        return session != null && session.consensusReady()
+                && !session.targetPerson().isEmpty() && !session.goal().isEmpty();
     }
 
     private void handleSecondaryAction() {
@@ -628,7 +629,7 @@ public class MainActivity extends Activity {
         privateReturnAudience = speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
                 || (viewedSession != null
                 && viewedSession.status() == CommunicationSession.Status.NEEDS_USER_INPUT
-                && !viewedSession.targetPerson().isEmpty())
+                && hasExternalMessages(viewedSession))
                 ? SpeechAudience.EXTERNAL_WITH_MATE
                 : SpeechAudience.MATE_HANDLING;
         if (runtime == null) {
@@ -1007,7 +1008,9 @@ public class MainActivity extends Activity {
                     && speechAudience != SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
             audienceCard.setVisibility(privateEditing
                     || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    || speechAudience == SpeechAudience.USER_DIRECT ? View.VISIBLE : View.GONE);
+                    || speechAudience == SpeechAudience.USER_DIRECT
+                    || (active && session.status() == CommunicationSession.Status.NEEDS_USER_INPUT)
+                    || (active && taskIsReady) ? View.VISIBLE : View.GONE);
 
             boolean showExternalTimeline = active && publicConversation && !privateEditing;
             externalSectionTitle.setVisibility(showExternalTimeline ? View.VISIBLE : View.GONE);
@@ -1052,42 +1055,34 @@ public class MainActivity extends Activity {
         }
 
         String person = session.targetPerson().isEmpty() ? "尚未確認" : session.targetPerson();
-        String goal = session.goal().isEmpty() ? "" : session.goal();
+        String goal = session.goal().isEmpty() ? "尚未確認" : session.goal();
+        String constraints = session.constraints().isEmpty() ? "尚未設定" : session.constraints();
+        String boundary = session.escalationBoundary().isEmpty() ? "尚未設定" : session.escalationBoundary();
         StringBuilder task = new StringBuilder();
 
-        if (inPerson) {
-            if (publicConversation) {
-                task.append("正在跟 ").append(person).append(" 溝通");
-                if (!goal.isEmpty()) task.append("\n").append(goal);
-                taskText.setTextSize(14);
-            } else if (taskIsReady) {
-                task.append("Mate 已理解 ✓\n\n")
-                        .append("跟誰：").append(person).append("\n")
-                        .append("要做什麼：").append(goal).append("\n")
-                        .append("語言：").append(languageLabel(selectedUserLanguage))
-                        .append(" → ").append(languageLabel(selectedOtherLanguage));
-                taskText.setTextSize(17);
-            } else {
-                task.append("正在理解你的任務…");
-                String brief = latestPrivateBrief(session);
-                if (!brief.isEmpty()) task.append("\n\n").append(brief);
-                taskText.setTextSize(16);
-            }
-        } else {
-            task.append("任務\n")
-                    .append("對象：").append(person).append("\n")
-                    .append("目標：").append(goal.isEmpty() ? "Mate 正在整理…" : goal);
-            String brief = latestPrivateBrief(session);
-            if (!brief.isEmpty()) task.append("\n\n你的交代：").append(brief);
-            taskText.setTextSize(14);
+        task.append("本次任務共識")
+                .append(taskIsReady ? "  ✓ 已對齊" : "  · 尚未完成")
+                .append("\n\n對象：").append(person)
+                .append("\n目的：").append(goal)
+                .append("\n限制／條件：").append(constraints)
+                .append("\n需要回來問你：").append(boundary)
+                .append("\n語言：").append(languageLabel(selectedUserLanguage))
+                .append(" → ").append(languageLabel(selectedOtherLanguage));
+
+        if (!session.pendingUserQuestion().isEmpty()) {
+            task.append("\n\nMate 想確認：").append(session.pendingUserQuestion());
         }
+        if (publicConversation) {
+            task.append("\n\n目前：正在跟 ").append(person).append(" 對話");
+        }
+        taskText.setTextSize(taskIsReady ? 15 : 14);
 
         if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會聽，也不會說話。");
         if (!session.pendingUserQuestion().isEmpty()) task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
         if (!session.outcomeSummary().isEmpty()) task.append("\n\n結果：").append(session.outcomeSummary());
 
         taskText.setText(task.toString());
-        taskText.setVisibility(privateEditing ? View.GONE : View.VISIBLE);
+        taskText.setVisibility(View.VISIBLE);
         externalSectionTitle.setText(inPerson
                 ? "對話 · Mate ↔ " + person
                 : "對外紀錄 · Mate ↔ " + person);
@@ -1118,14 +1113,19 @@ public class MainActivity extends Activity {
             audienceTitle.setText("你已接手對話");
             audienceDetail.setText("Mate 現在不會聽，也不會說話。");
         } else if (speechAudience == SpeechAudience.MATE_HANDLING) {
-            if (isInPersonMode() && taskReady(session)) {
+            if (session != null && session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                    && !session.pendingUserQuestion().isEmpty()) {
+                styleAudience(Color.rgb(72, 53, 18), amber);
+                audienceTitle.setText("Mate 想確認一件事");
+                audienceDetail.setText(session.pendingUserQuestion());
+            } else if (isInPersonMode() && taskReady(session)) {
                 styleAudience(Color.rgb(18, 56, 48), green);
-                audienceTitle.setText("✓ Mate 已理解");
-                audienceDetail.setText("確認內容後，讓 Mate 直接跟對方說。之後仍可隨時補充 context。");
+                audienceTitle.setText("✓ 你和 Mate 已對齊");
+                audienceDetail.setText("下面的「本次任務共識」就是 Mate 接下來會依照的目標與邊界。");
             } else {
                 styleAudience(surface2, muted);
-                audienceTitle.setText("Mate 正在整理任務");
-                audienceDetail.setText("會把你的交代整理成對象與目標；需要的話可以再補充。");
+                audienceTitle.setText("正在跟 Mate 對齊需求");
+                audienceDetail.setText("Mate 會先確認對象、目的、限制與需要回來問你的情況；資訊不足時會直接問你。");
             }
         } else {
             styleAudience(surface2, muted);
@@ -1198,7 +1198,7 @@ public class MainActivity extends Activity {
         }
 
         if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
-            primaryButton.setText("回答 Mate");
+            primaryButton.setText("回答 Mate 的問題");
             primaryButton.setBackground(roundRect(accent, 11));
         } else if (isInPersonMode() && taskReady(session)) {
             String person = session.targetPerson().isEmpty() ? "對方" : session.targetPerson();
