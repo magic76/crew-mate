@@ -92,6 +92,7 @@ public final class SessionStore {
         root.put("payment_fallback", session.paymentFallback());
         root.put("consensus_ready", session.consensusReady());
         root.put("outcome_summary", session.outcomeSummary());
+        root.put("completion_source", session.completionSource());
         root.put("user_language", session.userLanguage());
         root.put("other_person_language", session.otherPersonLanguage());
         root.put("user_direct_control", session.userDirectControl());
@@ -128,6 +129,7 @@ public final class SessionStore {
                     root.optString("payment_fallback"),
                     root.optBoolean("consensus_ready", false));
             session.setOutcomeSummary(root.optString("outcome_summary"));
+            session.setCompletionSource(root.optString("completion_source"));
             session.setLanguages(
                     root.optString("user_language", "AUTO"),
                     root.optString("other_person_language", "AUTO"));

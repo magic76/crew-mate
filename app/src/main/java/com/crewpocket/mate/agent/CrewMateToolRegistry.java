@@ -92,6 +92,7 @@ public final class CrewMateToolRegistry {
                     return;
                 }
                 session.setOutcomeSummary(summary);
+                session.setCompletionSource("MATE");
                 session.setPendingUserQuestion("");
                 session.setStatus(CommunicationSession.Status.COMPLETED);
                 notifyChanged();

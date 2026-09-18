@@ -230,7 +230,16 @@ public class MainActivity extends Activity {
         newTaskButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { requestNewTask(); }
         });
-        top.addView(newTaskButton, new LinearLayout.LayoutParams(dp(86), dp(38)));
+        top.addView(newTaskButton, new LinearLayout.LayoutParams(dp(82), dp(38)));
+
+        historyButton = actionButton("紀錄", surface2);
+        historyButton.setTextSize(11);
+        historyButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showHistory(); }
+        });
+        LinearLayout.LayoutParams historyTopLp = new LinearLayout.LayoutParams(dp(58), dp(38));
+        historyTopLp.setMargins(dp(6), 0, 0, 0);
+        top.addView(historyButton, historyTopLp);
 
         settingsButton = actionButton("設定", surface2);
         settingsButton.setTextSize(11);
@@ -399,9 +408,7 @@ public class MainActivity extends Activity {
         endConversationButton = actionButton("結束", Color.rgb(127, 29, 29));
         endConversationButton.setTextSize(12);
         endConversationButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (runtime != null) stopRuntime();
-            }
+            @Override public void onClick(View v) { showEndTaskOptions(); }
         });
         LinearLayout.LayoutParams endLp = new LinearLayout.LayoutParams(0, dp(52), 0.72f);
         endLp.setMargins(dp(8), 0, 0, 0);
@@ -409,16 +416,8 @@ public class MainActivity extends Activity {
         root.addView(modeActions);
 
         utilities = new LinearLayout(this);
-        utilities.setOrientation(LinearLayout.HORIZONTAL);
-        historyButton = actionButton("查看紀錄", surface2);
-        historyButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showHistory(); }
-        });
-        utilities.addView(historyButton,
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
-        LinearLayout.LayoutParams utilitiesLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        utilitiesLp.setMargins(0, dp(8), 0, 0);
-        root.addView(utilities, utilitiesLp);
+        utilities.setVisibility(View.GONE);
+        root.addView(utilities);
         return root;
     }
 
@@ -1029,36 +1028,143 @@ public class MainActivity extends Activity {
         status("Ready", muted);
     }
 
-    private void showHistory() {
-        if (runtime != null) {
-            Toast.makeText(this, "請先結束目前的即時對話再查看紀錄。", Toast.LENGTH_SHORT).show();
+    private void showEndTaskOptions() {
+        if (viewedSession == null) {
+            if (runtime != null) stopRuntime();
             return;
         }
+        new AlertDialog.Builder(this)
+                .setTitle("結束這次對話")
+                .setMessage("「任務已完成」會把這次任務標記為完成；「只結束 AI 通話」只會停止 Live 連線，任務仍可之後繼續。")
+                .setPositiveButton("任務已完成", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        completeTaskByUser();
+                    }
+                })
+                .setNeutralButton("只結束 AI 通話", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        stopRuntime();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void completeTaskByUser() {
+        if (speechAudience.routesMicrophoneToMate()) flushInputTurn();
+        CommunicationSession session = runtime == null ? viewedSession : runtime.session();
+        if (session == null) return;
+        session.setCompletionSource("USER");
+        if (session.outcomeSummary().isEmpty()) {
+            session.setOutcomeSummary("使用者確認任務已完成。");
+        }
+        session.setPendingUserQuestion("");
+        session.setStatus(CommunicationSession.Status.COMPLETED);
+        sessionStore.save(session);
+        viewedSession = session;
+        if (runtime != null) {
+            stopRuntime();
+        } else {
+            speechAudience = SpeechAudience.IDLE;
+            renderSession(session);
+        }
+        Toast.makeText(this, "任務已標記完成", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showHistory() {
+        if (viewedSession != null) sessionStore.save(viewedSession);
         final List<CommunicationSession> sessions = sessionStore.loadAll();
         if (sessions.isEmpty()) {
             Toast.makeText(this, "目前還沒有溝通紀錄。", Toast.LENGTH_SHORT).show();
             return;
         }
+
         String[] labels = new String[sessions.size()];
         for (int i = 0; i < sessions.size(); i++) {
             CommunicationSession session = sessions.get(i);
             String person = session.targetPerson().isEmpty() ? "未指定對象" : session.targetPerson();
             String goal = session.goal().isEmpty() ? "尚未確認目標" : session.goal();
-            labels[i] = person + " · " + goal + " · " + friendlyStatus(CrewMateRuntime.displayStatus(session.status()));
+            labels[i] = person + " · " + goal + " · " + historyStatus(session);
         }
+
         new AlertDialog.Builder(this)
-                .setTitle("溝通紀錄")
+                .setTitle("任務紀錄")
                 .setItems(labels, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
-                        viewedSession = sessions.get(which);
-                        selectedUserLanguage = viewedSession.userLanguage();
-                        selectedOtherLanguage = viewedSession.otherPersonLanguage();
-                        speechAudience = passiveAudience(viewedSession);
-                        renderLanguageControl();
-                        renderSession(viewedSession);
+                        showHistoryDetails(sessions.get(which));
                     }
                 })
                 .setNegativeButton("關閉", null)
+                .show();
+    }
+
+    private String historyStatus(CommunicationSession session) {
+        if (session == null) return "未知";
+        switch (session.status()) {
+            case COMPLETED:
+                return "USER".equals(session.completionSource()) ? "已完成（你確認）" : "已完成";
+            case NEEDS_USER_INPUT:
+                return "等待你決定";
+            case ERROR:
+                return "發生錯誤";
+            case STOPPED:
+                return "已暫停";
+            case THINKING:
+            default:
+                return runtime != null && viewedSession != null
+                        && viewedSession.sessionId.equals(session.sessionId)
+                        ? "進行中"
+                        : "未完成";
+        }
+    }
+
+    private void showHistoryDetails(CommunicationSession session) {
+        if (session == null) return;
+        StringBuilder body = new StringBuilder();
+        body.append("狀態：").append(historyStatus(session));
+        if (!session.targetPerson().isEmpty()) body.append("\n對象：").append(session.targetPerson());
+        if (!session.goal().isEmpty()) body.append("\n目的：").append(session.goal());
+        if (!session.constraints().isEmpty()) body.append("\n限制／條件：").append(session.constraints());
+        if (!session.escalationBoundary().isEmpty()) {
+            body.append("\n需要回來問你：").append(session.escalationBoundary());
+        }
+        if (!session.paymentPreference().isEmpty()) {
+            body.append("\n付款：").append(session.paymentPreference());
+        }
+        if (!session.outcomeSummary().isEmpty()) {
+            body.append("\n結果：").append(session.outcomeSummary());
+        }
+
+        List<Message> messages = session.messages();
+        if (!messages.isEmpty()) {
+            body.append("\n\n── 對話紀錄 ──");
+            for (Message message : messages) {
+                body.append("\n\n");
+                switch (message.sender) {
+                    case USER:
+                        body.append("你 → Mate");
+                        break;
+                    case MATE:
+                        body.append("Mate");
+                        if (!message.recipient.isEmpty()) body.append(" → ").append(message.recipient);
+                        break;
+                    case OTHER_PERSON:
+                        body.append(session.targetPerson().isEmpty() ? "對方" : session.targetPerson())
+                                .append(" → Mate");
+                        break;
+                    case SYSTEM:
+                    default:
+                        body.append("系統");
+                        break;
+                }
+                body.append("\n").append(message.content());
+            }
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(session.targetPerson().isEmpty() ? "任務紀錄" : session.targetPerson())
+                .setMessage(body.toString())
+                .setPositiveButton("關閉", null)
                 .show();
     }
 

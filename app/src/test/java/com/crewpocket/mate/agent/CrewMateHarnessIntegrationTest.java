@@ -205,6 +205,7 @@ public class CrewMateHarnessIntegrationTest {
 
         assertTrue(result.success());
         assertEquals(CommunicationSession.Status.COMPLETED, session.status());
+        assertEquals("MATE", session.completionSource());
         assertEquals("Reception confirmed the laundry bag should be left by the door.", session.outcomeSummary());
     }
 

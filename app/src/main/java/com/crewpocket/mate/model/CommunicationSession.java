@@ -25,6 +25,7 @@ public final class CommunicationSession {
     private String paymentFallback = "";
     private boolean consensusReady;
     private String outcomeSummary = "";
+    private String completionSource = "";
     private String userLanguage = "AUTO";
     private String otherPersonLanguage = "AUTO";
     private boolean userDirectControl;
@@ -48,6 +49,7 @@ public final class CommunicationSession {
     public synchronized String paymentFallback() { return paymentFallback; }
     public synchronized boolean consensusReady() { return consensusReady; }
     public synchronized String outcomeSummary() { return outcomeSummary; }
+    public synchronized String completionSource() { return completionSource; }
     public synchronized String userLanguage() { return userLanguage; }
     public synchronized String otherPersonLanguage() { return otherPersonLanguage; }
     public synchronized boolean userDirectControl() { return userDirectControl; }
@@ -82,6 +84,7 @@ public final class CommunicationSession {
     }
 
     public synchronized void setOutcomeSummary(String value) { outcomeSummary = clean(value); touch(); }
+    public synchronized void setCompletionSource(String value) { completionSource = clean(value); touch(); }
     public synchronized void setLanguages(String userValue, String otherValue) {
         userLanguage = language(userValue);
         otherPersonLanguage = language(otherValue);
