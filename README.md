@@ -333,3 +333,18 @@ The user can switch between:
 - **原文**
 
 Translation metadata is persisted with session history, so already-translated records do not need to be translated again.
+
+
+## System-bar safe layout
+
+Crew Mate uses explicit edge-to-edge layout handling on Android 11+ and applies safe insets itself.
+
+The main screen accounts for:
+- status bars
+- display cutouts
+- navigation bars
+- mandatory system gesture insets
+
+The bottom action row also gets extra visual safety spacing so stage-two controls remain above both gesture navigation and three-button navigation.
+
+History list/detail dialogs use self-contained rounded sheets with adaptive scroll heights and their own action rows instead of the platform AlertDialog footer. This avoids the large dark/gray footer block and keeps dialogs inside system bars.
