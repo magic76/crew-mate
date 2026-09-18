@@ -39,16 +39,9 @@ public final class CrewMateToolRegistry {
                 String escalationBoundary = arg(call, "escalation_boundary");
                 boolean ready = boolArg(call, "ready");
 
-                if (target.isEmpty()) {
-                    completion.complete(ToolResult.failure(call.id(), "PERSON_REQUIRED", "Target person is empty"));
-                    return;
-                }
-                if (goal.isEmpty()) {
-                    completion.complete(ToolResult.failure(call.id(), "GOAL_REQUIRED", "Goal is empty"));
-                    return;
-                }
-
-                String personId = "local-" + target.toLowerCase(Locale.US).replace(' ', '-');
+                String personId = target.isEmpty()
+                        ? ""
+                        : "local-" + target.toLowerCase(Locale.US).replace(' ', '-');
                 session.setConsensus(personId, target, goal, constraints, escalationBoundary, ready);
                 session.setOutcomeSummary("");
                 session.setUserDirectControl(false);
