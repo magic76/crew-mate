@@ -1151,7 +1151,7 @@ public class MainActivity extends Activity {
         }
         if (externalCount == 0) {
             addPlaceholder(externalTimeline, isInPersonMode()
-                    ? "把手機交給對方後，對方與 Mate 的語音內容會出現在這裡。"
+                    ? "等待 " + person + " 開口…\n對方實際說話後，才會開始建立對話紀錄。"
                     : "Mate 對外送出的內容與對方回覆會完整出現在這裡。");
         }
         if (privateCount == 0) {
