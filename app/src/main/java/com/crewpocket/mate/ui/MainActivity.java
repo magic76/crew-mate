@@ -35,10 +35,15 @@ import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
 import com.crewpocket.mate.storage.SessionStore;
 import com.crewpocket.mate.voice.GeminiLiveModelSession;
+import com.crewpocket.mate.voice.GeminiTranslationService;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /** Task-first UI with an explicit speech audience boundary. */
 public class MainActivity extends Activity {
@@ -82,11 +87,13 @@ public class MainActivity extends Activity {
     private Button primaryButton;
     private Button directButton;
     private Button endConversationButton;
+    private Button moreButton;
     private Button settingsButton;
     private LinearLayout callBar;
     private TextView callStateText;
     private Button languageButton;
     private Button audioOutputButton;
+    private Button transcriptModeButton;
     private Button callToggleButton;
     private TextView statusText;
     private TextView taskText;
@@ -111,6 +118,8 @@ public class MainActivity extends Activity {
     private CrewMateRuntime runtime;
     private GeminiLiveModelSession modelSession;
     private SessionStore sessionStore;
+    private GeminiTranslationService translationService;
+    private final Set<String> translationInFlight = new HashSet<String>();
     private CommunicationSession viewedSession;
     private LiveCallState liveCallState = LiveCallState.OFF;
     private SpeechAudience speechAudience = SpeechAudience.IDLE;
@@ -123,6 +132,8 @@ public class MainActivity extends Activity {
     private String selectedUserLanguage = "AUTO";
     private String selectedOtherLanguage = "AUTO";
     private AudioOutputMode audioOutputMode = AudioOutputMode.MEDIA;
+    // 0 = bilingual, 1 = translated/user language, 2 = original.
+    private int transcriptDisplayMode;
     private boolean oneShotPrivateSupplement;
 
     @Override
@@ -131,6 +142,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         sessionStore = new SessionStore(this);
+        translationService = new GeminiTranslationService(AppConfig.getApiKey(this));
         selectedUserLanguage = defaultUserLanguage();
         audioOutputMode = AppConfig.getAudioOutputMode(this);
         setContentView(buildUi());
@@ -281,6 +293,15 @@ public class MainActivity extends Activity {
         outputLp.setMargins(0, 0, dp(6), 0);
         callBar.addView(audioOutputButton, outputLp);
 
+        transcriptModeButton = actionButton("雙語", surface2);
+        transcriptModeButton.setTextSize(10);
+        transcriptModeButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { cycleTranscriptDisplayMode(); }
+        });
+        LinearLayout.LayoutParams transcriptLp = new LinearLayout.LayoutParams(dp(64), dp(38));
+        transcriptLp.setMargins(0, 0, dp(6), 0);
+        callBar.addView(transcriptModeButton, transcriptLp);
+
         callToggleButton = actionButton("開啟", surface2);
         callToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { handleLiveCallToggle(); }
@@ -405,14 +426,23 @@ public class MainActivity extends Activity {
         directLp.setMargins(dp(8), 0, 0, 0);
         modeActions.addView(directButton, directLp);
 
-        endConversationButton = actionButton("結束", Color.rgb(127, 29, 29));
-        endConversationButton.setTextSize(12);
+        endConversationButton = actionButton("完成任務", Color.rgb(5, 150, 105));
+        endConversationButton.setTextSize(11);
         endConversationButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showEndTaskOptions(); }
+            @Override public void onClick(View v) { confirmCompleteTask(); }
         });
-        LinearLayout.LayoutParams endLp = new LinearLayout.LayoutParams(0, dp(52), 0.72f);
+        LinearLayout.LayoutParams endLp = new LinearLayout.LayoutParams(0, dp(52), 0.92f);
         endLp.setMargins(dp(8), 0, 0, 0);
         modeActions.addView(endConversationButton, endLp);
+
+        moreButton = actionButton("⋯", surface2);
+        moreButton.setTextSize(16);
+        moreButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showEndTaskOptions(); }
+        });
+        LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(dp(48), dp(52));
+        moreLp.setMargins(dp(8), 0, 0, 0);
+        modeActions.addView(moreButton, moreLp);
         root.addView(modeActions);
 
         utilities = new LinearLayout(this);
