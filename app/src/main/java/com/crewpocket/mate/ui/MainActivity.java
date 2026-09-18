@@ -9,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
@@ -17,6 +18,7 @@ import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowInsets;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -142,6 +144,9 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
         sessionStore = new SessionStore(this);
         translationService = new GeminiTranslationService(AppConfig.getApiKey(this));
         selectedUserLanguage = defaultUserLanguage();
@@ -190,7 +195,8 @@ public class MainActivity extends Activity {
         final int baseTop = dp(16);
         final int baseRight = dp(18);
         final int baseBottom = dp(16);
-        root.setPadding(baseLeft, baseTop, baseRight, baseBottom);
+        final int bottomSafety = dp(10);
+        root.setPadding(baseLeft, baseTop, baseRight, baseBottom + bottomSafety);
         root.setBackgroundColor(bg);
         root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
@@ -199,11 +205,14 @@ public class MainActivity extends Activity {
                 int right;
                 int bottom;
                 if (Build.VERSION.SDK_INT >= 30) {
-                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                    left = bars.left;
-                    top = bars.top;
-                    right = bars.right;
-                    bottom = bars.bottom;
+                    Insets barsAndCutout = insets.getInsets(
+                            WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    Insets navigation = insets.getInsets(
+                            WindowInsets.Type.navigationBars() | WindowInsets.Type.mandatorySystemGestures());
+                    left = barsAndCutout.left;
+                    top = barsAndCutout.top;
+                    right = barsAndCutout.right;
+                    bottom = Math.max(barsAndCutout.bottom, navigation.bottom);
                 } else {
                     left = insets.getSystemWindowInsetLeft();
                     top = insets.getSystemWindowInsetTop();
@@ -214,9 +223,12 @@ public class MainActivity extends Activity {
                         baseLeft + left,
                         baseTop + top,
                         baseRight + right,
-                        baseBottom + bottom);
+                        baseBottom + bottom + bottomSafety);
                 return insets;
             }
+        });
+        root.post(new Runnable() {
+            @Override public void run() { root.requestApplyInsets(); }
         });
 
         LinearLayout top = new LinearLayout(this);
@@ -445,7 +457,10 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(dp(48), dp(52));
         moreLp.setMargins(dp(8), 0, 0, 0);
         modeActions.addView(moreButton, moreLp);
-        root.addView(modeActions);
+        LinearLayout.LayoutParams modeLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        modeLp.setMargins(0, 0, 0, dp(8));
+        root.addView(modeActions, modeLp);
 
         utilities = new LinearLayout(this);
         utilities.setVisibility(View.GONE);
@@ -1136,7 +1151,7 @@ public class MainActivity extends Activity {
 
         final LinearLayout sheet = new LinearLayout(this);
         sheet.setOrientation(LinearLayout.VERTICAL);
-        sheet.setPadding(dp(18), dp(16), dp(18), dp(8));
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(14));
         sheet.setBackground(roundRect(surface, 18));
 
         TextView title = new TextView(this);
@@ -1155,14 +1170,22 @@ public class MainActivity extends Activity {
 
         final LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(0, 0, 0, dp(2));
+
         final ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setClipToPadding(false);
         scroll.addView(list);
+
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int desiredListHeight = Math.max(dp(138), sessions.size() * dp(124));
+        int maxListHeight = Math.max(dp(220), (int) (screenHeight * 0.58f));
+        int listHeight = Math.min(desiredListHeight, maxListHeight);
         sheet.addView(scroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(500)));
+                ViewGroup.LayoutParams.MATCH_PARENT, listHeight));
 
         final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(sheet)
-                .setNegativeButton("關閉", null)
                 .create();
 
         for (final CommunicationSession session : sessions) {
@@ -1189,7 +1212,7 @@ public class MainActivity extends Activity {
             state.setTextColor(session.status() == CommunicationSession.Status.COMPLETED ? green
                     : session.status() == CommunicationSession.Status.NEEDS_USER_INPUT ? amber : muted);
             state.setPadding(dp(8), dp(4), dp(8), dp(4));
-            state.setBackground(roundRect(surface, 9));
+            state.setBackground(roundRect(bg, 9));
             header.addView(state);
             card.addView(header);
 
@@ -1237,9 +1260,22 @@ public class MainActivity extends Activity {
 
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, dp(5), 0, dp(7));
+            lp.setMargins(0, dp(4), 0, dp(7));
             list.addView(card, lp);
         }
+
+        Button close = actionButton("關閉", surface2);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dialog.dismiss(); }
+        });
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+        closeLp.setMargins(0, dp(8), 0, 0);
+        sheet.addView(close, closeLp);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface ignored) { styleHistoryDialog(dialog); }
+        });
         dialog.show();
     }
 
@@ -1359,29 +1395,81 @@ public class MainActivity extends Activity {
             }
         }
 
+        final LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(14));
+        sheet.setBackground(roundRect(surface, 18));
+
+        TextView header = new TextView(this);
+        header.setText(session.targetPerson().isEmpty() ? "任務詳情" : session.targetPerson());
+        header.setTextColor(text);
+        header.setTextSize(20);
+        header.setTypeface(Typeface.DEFAULT_BOLD);
+        header.setPadding(0, 0, 0, dp(8));
+        sheet.addView(header);
+
         ScrollView scroll = new ScrollView(this);
-        scroll.setPadding(dp(12), 0, dp(12), 0);
+        scroll.setFillViewport(false);
+        scroll.setClipToPadding(false);
         scroll.addView(content);
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int detailHeight = Math.max(dp(280), (int) (screenHeight * 0.56f));
+        sheet.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, detailHeight));
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle(session.targetPerson().isEmpty() ? "任務詳情" : session.targetPerson())
-                .setView(scroll)
-                .setNegativeButton("關閉", null);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(sheet)
+                .create();
 
-        if (session.status() == CommunicationSession.Status.COMPLETED) {
-            builder.setPositiveButton("以此建立新任務", new DialogInterface.OnClickListener() {
-                @Override public void onClick(DialogInterface dialog, int which) {
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, dp(10), 0, 0);
+
+        Button close = actionButton("關閉", surface2);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dialog.dismiss(); }
+        });
+        actions.addView(close, new LinearLayout.LayoutParams(0, dp(44), 1f));
+
+        Button primary = actionButton(
+                session.status() == CommunicationSession.Status.COMPLETED
+                        ? "以此建立新任務"
+                        : "繼續此任務",
+                accentSurface);
+        primary.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                dialog.dismiss();
+                if (session.status() == CommunicationSession.Status.COMPLETED) {
                     requestCloneHistoricalTask(session);
-                }
-            });
-        } else {
-            builder.setPositiveButton("繼續此任務", new DialogInterface.OnClickListener() {
-                @Override public void onClick(DialogInterface dialog, int which) {
+                } else {
                     resumeHistoricalSession(session);
                 }
-            });
+            }
+        });
+        LinearLayout.LayoutParams primaryLp = new LinearLayout.LayoutParams(0, dp(44), 1.35f);
+        primaryLp.setMargins(dp(8), 0, 0, 0);
+        actions.addView(primary, primaryLp);
+        sheet.addView(actions);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface ignored) { styleHistoryDialog(dialog); }
+        });
+        dialog.show();
+    }
+
+    private void styleHistoryDialog(AlertDialog dialog) {
+        if (dialog == null) return;
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        window.setStatusBarColor(bg);
+        window.setNavigationBarColor(bg);
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(true);
         }
-        builder.show();
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int width = Math.min(screenWidth - dp(24), dp(680));
+        window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void addHistorySection(LinearLayout container, String label, String value) {
