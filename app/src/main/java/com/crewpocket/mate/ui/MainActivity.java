@@ -1416,6 +1416,11 @@ public class MainActivity extends Activity {
     private void resumeHistoricalSession(final CommunicationSession selected) {
         if (selected == null || selected.status() == CommunicationSession.Status.COMPLETED) return;
         if (runtime != null && viewedSession != null
+                && viewedSession.sessionId.equals(selected.sessionId)) {
+            Toast.makeText(this, "這就是目前正在進行的任務", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (runtime != null && viewedSession != null
                 && !viewedSession.sessionId.equals(selected.sessionId)) {
             new AlertDialog.Builder(this)
                     .setTitle("切換任務？")
