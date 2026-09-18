@@ -824,11 +824,6 @@ public class MainActivity extends Activity {
                             applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
                             Toast.makeText(MainActivity.this, "共識已更新，繼續對話", Toast.LENGTH_SHORT).show();
                             status("External live", green);
-                        } else if (session.consensusReady()
-                                && speechAudience == SpeechAudience.PRIVATE_TO_MATE
-                                && privateReturnAudience != SpeechAudience.EXTERNAL_WITH_MATE) {
-                            applyAudience(SpeechAudience.MATE_HANDLING);
-                            status("Consensus ready", green);
                         }
                         renderSession(session);
                     }
@@ -1036,6 +1031,7 @@ public class MainActivity extends Activity {
                     && !publicConversation
                     && session.status() != CommunicationSession.Status.COMPLETED;
             modeActions.setVisibility((showAlignmentAction
+                    || session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
                     || speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
                     || speechAudience == SpeechAudience.USER_DIRECT)
                     ? View.VISIBLE : View.GONE);
