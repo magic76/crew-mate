@@ -25,7 +25,6 @@ import android.widget.Toast;
 
 import com.crewpocket.mate.agent.CrewMateRuntime;
 import com.crewpocket.mate.channel.InPersonMessagingBackend;
-import com.crewpocket.mate.channel.MessagingBackend;
 import com.crewpocket.mate.config.AppConfig;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
@@ -787,7 +786,7 @@ public class MainActivity extends Activity {
             taskText.setTextSize(14);
         }
 
-        if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會自主送新訊息。");
+        if (session.userDirectControl()) task.append("\n\n你目前已接手，Mate 不會聽，也不會說話。");
         if (!session.pendingUserQuestion().isEmpty()) task.append("\n\n需要你決定：").append(session.pendingUserQuestion());
         if (!session.outcomeSummary().isEmpty()) task.append("\n\n結果：").append(session.outcomeSummary());
 
@@ -820,7 +819,7 @@ public class MainActivity extends Activity {
         } else if (speechAudience == SpeechAudience.USER_DIRECT) {
             styleAudience(Color.rgb(83, 45, 20), direct);
             audienceTitle.setText("你已接手對話");
-            audienceDetail.setText("Mate 現在不會聽、不會說，也不會送出訊息。");
+            audienceDetail.setText("Mate 現在不會聽，也不會說話。");
         } else if (speechAudience == SpeechAudience.MATE_HANDLING) {
             if (isInPersonMode() && taskReady(session)) {
                 styleAudience(Color.rgb(18, 56, 48), green);
@@ -895,8 +894,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (runtime == null && (session.status() == CommunicationSession.Status.REPLY_RECEIVED
-                || session.status() == CommunicationSession.Status.STOPPED)) {
+        if (runtime == null && session.status() == CommunicationSession.Status.STOPPED) {
             primaryButton.setText("讓 Mate 繼續");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
@@ -966,9 +964,8 @@ public class MainActivity extends Activity {
             }
         }
         if (externalCount == 0) {
-            addPlaceholder(externalTimeline, isInPersonMode()
-                    ? "等待 " + person + " 開口…\n對方實際說話後，才會開始建立對話紀錄。"
-                    : "Mate 對外送出的內容與對方回覆會完整出現在這裡。");
+            addPlaceholder(externalTimeline,
+                    "等待 " + person + " 開口…\n對方實際說話後，才會開始建立對話紀錄。");
         }
         if (privateCount == 0) {
             addPlaceholder(privateTimeline, "你用語音或文字交代給 Mate 的內容會留在這裡，不會原文直接給對方。");
