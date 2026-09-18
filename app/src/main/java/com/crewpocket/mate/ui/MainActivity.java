@@ -313,6 +313,7 @@ public class MainActivity extends Activity {
         root.addView(callBar, callLp);
         renderLanguageControl();
         renderAudioOutputControl();
+        renderTranscriptModeControl();
         renderLiveCallControl();
 
         statusText = new TextView(this);
@@ -1302,8 +1303,10 @@ public class MainActivity extends Activity {
 
             // During stage 2 keep only the call state + end action in the top bar.
             languageButton.setVisibility(stageTwo ? View.GONE : View.VISIBLE);
+            transcriptModeButton.setVisibility(stageTwo ? View.VISIBLE : View.GONE);
             audioOutputButton.setVisibility(View.VISIBLE);
         } else {
+            transcriptModeButton.setVisibility(publicConversation ? View.VISIBLE : View.GONE);
             statusText.setVisibility(active ? View.VISIBLE : View.GONE);
             externalSectionTitle.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
             externalScroll.setVisibility(active && publicConversation ? View.VISIBLE : View.GONE);
@@ -1327,6 +1330,7 @@ public class MainActivity extends Activity {
             audienceCard.setVisibility(View.GONE);
             modeActions.setVisibility(View.GONE);
             utilities.setVisibility(View.GONE);
+            transcriptModeButton.setVisibility(View.GONE);
             renderAudience(null);
             renderControls(null);
             return;
@@ -1451,6 +1455,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
             composerLabel.setText("先告訴 Mate 你想做什麼");
             taskVoiceButton.setText("🎙  口頭交代");
             taskInputButton.setText("交代給 Mate");
@@ -1462,6 +1467,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
             return;
         }
 
@@ -1470,6 +1476,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.VISIBLE);
+            moreButton.setVisibility(View.VISIBLE);
             return;
         }
 
@@ -1479,6 +1486,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
             composerLabel.setText(supplement
                     ? "補充 context 給 Mate"
                     : "把需求交代給 Mate");
@@ -1504,6 +1512,7 @@ public class MainActivity extends Activity {
             directButton.setText("我要自己說");
             directButton.setBackground(roundRect(direct, 11));
             endConversationButton.setVisibility(View.VISIBLE);
+            moreButton.setVisibility(View.VISIBLE);
             return;
         }
 
@@ -1511,6 +1520,7 @@ public class MainActivity extends Activity {
             primaryButton.setText("回答 Mate 的問題");
             primaryButton.setBackground(roundRect(accent, 11));
             endConversationButton.setVisibility(hasExternalMessages(session) ? View.VISIBLE : View.GONE);
+            moreButton.setVisibility(hasExternalMessages(session) ? View.VISIBLE : View.GONE);
         } else if (isInPersonMode() && taskReady(session)) {
             String person = session.targetPerson().isEmpty() ? "對方" : session.targetPerson();
             primaryButton.setText("第 2 步 · 讓 Mate 跟 " + person + " 說");
@@ -1523,6 +1533,7 @@ public class MainActivity extends Activity {
         boolean canSupplement = isInPersonMode() && taskReady(session);
         if (session.status() != CommunicationSession.Status.NEEDS_USER_INPUT) {
             endConversationButton.setVisibility(View.GONE);
+            moreButton.setVisibility(View.GONE);
         }
         directButton.setVisibility(canSupplement ? View.VISIBLE : View.GONE);
         directButton.setText(publicConversationActive() ? "我要自己說" : "補充 context");
