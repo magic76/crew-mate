@@ -1,6 +1,5 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.InPersonMessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.magic76.crew.agent.ModelEvent;
 import com.magic76.crew.agent.ModelSession;
@@ -18,8 +17,7 @@ public class CrewMateRuntimeStateTest {
         CommunicationSession session = new CommunicationSession();
         session.setStatus(CommunicationSession.Status.COMPLETED);
 
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, new RecordingModelSession(), new InPersonMessagingBackend(), noOpListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, new RecordingModelSession(), noOpListener());
         runtime.start();
         session.setStatus(CommunicationSession.Status.COMPLETED);
         runtime.close();
@@ -33,8 +31,7 @@ public class CrewMateRuntimeStateTest {
         session.setStatus(CommunicationSession.Status.NEEDS_USER_INPUT);
 
         RecordingModelSession model = new RecordingModelSession();
-        CrewMateRuntime runtime = new CrewMateRuntime(
-                session, model, new InPersonMessagingBackend(), noOpListener());
+        CrewMateRuntime runtime = new CrewMateRuntime(session, model, noOpListener());
         runtime.start();
         model.emit(ModelEvent.simple(ModelEvent.Type.STOPPED));
 
