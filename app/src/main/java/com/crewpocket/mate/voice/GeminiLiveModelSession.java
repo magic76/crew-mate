@@ -9,6 +9,9 @@ import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.NoiseSuppressor;
+import android.os.SystemClock;
 import android.util.Base64;
 
 import com.crewpocket.mate.model.AudioOutputMode;
@@ -44,6 +47,7 @@ public final class GeminiLiveModelSession implements ModelSession {
     private static final String WS_PATH = "/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
     private static final int INPUT_RATE = 16000;
     private static final int OUTPUT_RATE = 24000;
+    private static final long PLAYBACK_ECHO_GUARD_MS = 350L;
 
     public interface UiListener {
         void onStatus(String status);
@@ -74,8 +78,11 @@ public final class GeminiLiveModelSession implements ModelSession {
     private volatile AudioOutputMode audioOutputMode = AudioOutputMode.MEDIA;
     private volatile boolean userAudioEnabled;
     private volatile boolean playbackEnabled;
+    private volatile long micSuppressedUntilMs;
     private AudioRecord recorder;
     private AudioTrack player;
+    private AcousticEchoCanceler echoCanceler;
+    private NoiseSuppressor noiseSuppressor;
     private Thread micThread;
 
     public GeminiLiveModelSession(Context context, String apiKey, String voiceName, UiListener uiListener) {
@@ -507,6 +514,7 @@ public final class GeminiLiveModelSession implements ModelSession {
                     INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, inputBuffer);
         }
 
+        enableInputAudioEffects();
         recording = true;
         recorder.startRecording();
         micThread = new Thread(new Runnable() {
@@ -551,6 +559,9 @@ public final class GeminiLiveModelSession implements ModelSession {
                 break;
             }
             if (read <= 0 || !userAudioEnabled) continue;
+            if (!shouldSendCapturedAudio(speaking, micSuppressedUntilMs, SystemClock.elapsedRealtime())) {
+                continue;
+            }
             byte[] frame = new byte[read];
             System.arraycopy(buffer, 0, frame, 0, read);
             sendUserAudio(frame);
@@ -561,9 +572,59 @@ public final class GeminiLiveModelSession implements ModelSession {
         try {
             AudioTrack target = player;
             if (running && playbackEnabled && target != null) {
+                long durationMs = Math.max(1L,
+                        (pcm.length * 1000L) / (OUTPUT_RATE * 2L));
+                extendMicSuppression(SystemClock.elapsedRealtime()
+                        + durationMs + PLAYBACK_ECHO_GUARD_MS);
                 target.write(pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
             }
         } catch (Exception ignored) {}
+    }
+
+    static boolean shouldSendCapturedAudio(boolean mateSpeaking, long suppressedUntilMs, long nowMs) {
+        return !mateSpeaking && nowMs >= suppressedUntilMs;
+    }
+
+    private synchronized void extendMicSuppression(long untilMs) {
+        micSuppressedUntilMs = Math.max(micSuppressedUntilMs, untilMs);
+    }
+
+    private synchronized void enableInputAudioEffects() {
+        releaseInputAudioEffects();
+        AudioRecord target = recorder;
+        if (target == null) return;
+        int sessionId = target.getAudioSessionId();
+        try {
+            if (AcousticEchoCanceler.isAvailable()) {
+                echoCanceler = AcousticEchoCanceler.create(sessionId);
+                if (echoCanceler != null) echoCanceler.setEnabled(true);
+            }
+        } catch (Exception ignored) {
+            echoCanceler = null;
+        }
+        try {
+            if (NoiseSuppressor.isAvailable()) {
+                noiseSuppressor = NoiseSuppressor.create(sessionId);
+                if (noiseSuppressor != null) noiseSuppressor.setEnabled(true);
+            }
+        } catch (Exception ignored) {
+            noiseSuppressor = null;
+        }
+    }
+
+    private synchronized void releaseInputAudioEffects() {
+        AcousticEchoCanceler aec = echoCanceler;
+        echoCanceler = null;
+        if (aec != null) {
+            try { aec.setEnabled(false); } catch (Exception ignored) {}
+            try { aec.release(); } catch (Exception ignored) {}
+        }
+        NoiseSuppressor ns = noiseSuppressor;
+        noiseSuppressor = null;
+        if (ns != null) {
+            try { ns.setEnabled(false); } catch (Exception ignored) {}
+            try { ns.release(); } catch (Exception ignored) {}
+        }
     }
 
     private synchronized void stopInputAudio() {
@@ -571,6 +632,7 @@ public final class GeminiLiveModelSession implements ModelSession {
         AudioRecord target = recorder;
         recorder = null;
         micThread = null;
+        releaseInputAudioEffects();
         if (target != null) {
             try { target.stop(); } catch (Exception ignored) {}
             try { target.release(); } catch (Exception ignored) {}
@@ -620,6 +682,9 @@ public final class GeminiLiveModelSession implements ModelSession {
         if (!playbackEnabled) value = false;
         if (speaking == value) return;
         speaking = value;
+        if (!value) {
+            extendMicSuppression(SystemClock.elapsedRealtime() + PLAYBACK_ECHO_GUARD_MS);
+        }
         if (uiListener != null) uiListener.onSpeakingChanged(value);
     }
 
