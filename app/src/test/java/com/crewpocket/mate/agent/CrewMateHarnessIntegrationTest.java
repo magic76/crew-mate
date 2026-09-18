@@ -1,6 +1,5 @@
 package com.crewpocket.mate.agent;
 
-import com.crewpocket.mate.channel.InPersonMessagingBackend;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
 import com.magic76.crew.agent.AgentEvent;
@@ -80,7 +79,7 @@ public class CrewMateHarnessIntegrationTest {
     @Test
     public void findContactStoresVisiblePersonAndGoal() {
         CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, new InPersonMessagingBackend(), noOpListener());
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
 
         ToolResult result = execute(tools.registry(), call("find", "find_contact",
                 map("query", "Reception", "goal", "Ask where to put the laundry bag")));
@@ -93,7 +92,7 @@ public class CrewMateHarnessIntegrationTest {
     @Test
     public void requestUserInputStoresQuestion() {
         CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, new InPersonMessagingBackend(), noOpListener());
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
 
         ToolResult result = execute(tools.registry(), call("ask", "request_user_input",
                 map("question", "最多可以接受多少費用？")));
@@ -106,7 +105,7 @@ public class CrewMateHarnessIntegrationTest {
     @Test
     public void completeTaskStoresOutcomeAndCompletedState() {
         CommunicationSession session = new CommunicationSession();
-        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, new InPersonMessagingBackend(), noOpListener());
+        CrewMateToolRegistry tools = new CrewMateToolRegistry(session, noOpListener());
         execute(tools.registry(), call("find", "find_contact",
                 map("query", "Reception", "goal", "Ask where to put the laundry bag")));
 
