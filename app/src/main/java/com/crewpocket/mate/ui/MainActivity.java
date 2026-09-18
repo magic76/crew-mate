@@ -120,6 +120,7 @@ public class MainActivity extends Activity {
     private SessionStore sessionStore;
     private GeminiTranslationService translationService;
     private final Set<String> translationInFlight = new HashSet<String>();
+    private final Set<String> translationAttempted = new HashSet<String>();
     private CommunicationSession viewedSession;
     private LiveCallState liveCallState = LiveCallState.OFF;
     private SpeechAudience speechAudience = SpeechAudience.IDLE;
@@ -1661,7 +1662,7 @@ public class MainActivity extends Activity {
         taskText.setText(task.toString());
         taskText.setVisibility(View.VISIBLE);
         externalSectionTitle.setText(inPerson
-                ? "即時對話"
+                ? "即時對話 · " + (transcriptDisplayMode == 0 ? "雙語" : transcriptDisplayMode == 1 ? "譯文" : "原文")
                 : "對外紀錄 · Mate ↔ " + person);
         privateSectionTitle.setText("🔒 私人 · 你 ↔ Mate");
         renderTimelines(session, person);
@@ -1843,12 +1844,12 @@ public class MainActivity extends Activity {
         int externalCount = 0;
         int privateCount = 0;
         for (Message message : session.messages()) {
-            boolean external = message.sender == Message.Sender.OTHER_PERSON
-                    || (message.sender == Message.Sender.MATE && !"USER".equals(message.recipient));
+            boolean external = isExternalMessage(message);
             if (external) {
+                ensureMessageTranslation(session, message);
                 boolean mate = message.sender == Message.Sender.MATE;
                 String label = mate ? "Mate → " + person : person + " → Mate";
-                addBubble(externalTimeline, label, message.content(), mate, false);
+                addExternalBubble(externalTimeline, label, message, mate);
                 externalCount++;
             } else if (message.sender == Message.Sender.USER || message.sender == Message.Sender.MATE) {
                 boolean user = message.sender == Message.Sender.USER;
@@ -1865,6 +1866,168 @@ public class MainActivity extends Activity {
         }
         if (followExternal) scrollToBottom(externalScroll);
         if (followPrivate) scrollToBottom(privateScroll);
+    }
+
+    private boolean isExternalMessage(Message message) {
+        return message != null && (message.sender == Message.Sender.OTHER_PERSON
+                || (message.sender == Message.Sender.MATE && !"USER".equals(message.recipient)));
+    }
+
+    private String effectiveUserLanguage(CommunicationSession session) {
+        String language = session == null ? selectedUserLanguage : session.userLanguage();
+        if (language == null || language.trim().isEmpty() || "AUTO".equalsIgnoreCase(language)) {
+            return defaultUserLanguage();
+        }
+        return language;
+    }
+
+    private void ensureSessionTranslations(CommunicationSession session) {
+        if (session == null) return;
+        for (Message message : session.messages()) {
+            if (isExternalMessage(message)) ensureMessageTranslation(session, message);
+        }
+    }
+
+    private void ensureMessageTranslation(final CommunicationSession session, final Message message) {
+        if (session == null || message == null || !isExternalMessage(message)) return;
+        final String targetLanguage = effectiveUserLanguage(session);
+        String sourceLanguage = message.originalLanguage().isEmpty()
+                ? session.otherPersonLanguage()
+                : message.originalLanguage();
+        if (sourceLanguage == null || sourceLanguage.trim().isEmpty()) sourceLanguage = "AUTO";
+        final String source = sourceLanguage;
+
+        if (!message.translatedText().isEmpty()
+                && targetLanguage.equalsIgnoreCase(message.translatedLanguage())) return;
+
+        if (!"AUTO".equalsIgnoreCase(source) && source.equalsIgnoreCase(targetLanguage)) {
+            message.setTranslation(message.content(), source, targetLanguage);
+            sessionStore.save(session);
+            return;
+        }
+
+        synchronized (translationAttempted) {
+            if (translationAttempted.contains(message.id)) return;
+            translationAttempted.add(message.id);
+        }
+        synchronized (translationInFlight) {
+            translationInFlight.add(message.id);
+        }
+
+        GeminiTranslationService service = translationService;
+        if (service == null) {
+            synchronized (translationInFlight) { translationInFlight.remove(message.id); }
+            return;
+        }
+
+        service.translate(message.content(), source, targetLanguage, new GeminiTranslationService.Listener() {
+            @Override public void onTranslated(final String translatedText) {
+                synchronized (translationInFlight) { translationInFlight.remove(message.id); }
+                message.setTranslation(translatedText, source, targetLanguage);
+                sessionStore.save(session);
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (viewedSession != null && viewedSession.sessionId.equals(session.sessionId)) {
+                            renderSession(viewedSession);
+                        }
+                    }
+                });
+            }
+
+            @Override public void onError() {
+                synchronized (translationInFlight) { translationInFlight.remove(message.id); }
+            }
+        });
+    }
+
+    private void addExternalBubble(LinearLayout container, String label, Message message, boolean right) {
+        LinearLayout bubble = new LinearLayout(this);
+        bubble.setOrientation(LinearLayout.VERTICAL);
+        bubble.setPadding(dp(12), dp(9), dp(12), dp(10));
+        bubble.setBackground(roundRect(right ? accentSurface : inboundSurface, 14));
+
+        TextView meta = new TextView(this);
+        meta.setText(label);
+        meta.setTextSize(10);
+        meta.setTextColor(muted);
+        meta.setTypeface(Typeface.DEFAULT_BOLD);
+        bubble.addView(meta);
+
+        String original = message.content() == null ? "" : message.content();
+        String translated = message.translatedText() == null ? "" : message.translatedText();
+        boolean hasDistinctTranslation = !translated.isEmpty() && !translated.equals(original);
+
+        if (transcriptDisplayMode == 2) {
+            TextView originalView = new TextView(this);
+            originalView.setText(original);
+            originalView.setTextSize(13);
+            originalView.setTextColor(text);
+            originalView.setLineSpacing(0, 1.16f);
+            originalView.setPadding(0, dp(4), 0, 0);
+            bubble.addView(originalView);
+        } else if (transcriptDisplayMode == 1) {
+            TextView translatedView = new TextView(this);
+            translatedView.setText(hasDistinctTranslation ? translated : original);
+            translatedView.setTextSize(14);
+            translatedView.setTextColor(text);
+            translatedView.setLineSpacing(0, 1.16f);
+            translatedView.setPadding(0, dp(4), 0, 0);
+            bubble.addView(translatedView);
+            if (!hasDistinctTranslation && isTranslationPending(message)) {
+                TextView pending = new TextView(this);
+                pending.setText("翻譯中…");
+                pending.setTextSize(9);
+                pending.setTextColor(muted);
+                pending.setPadding(0, dp(4), 0, 0);
+                bubble.addView(pending);
+            }
+        } else {
+            TextView translatedView = new TextView(this);
+            translatedView.setText(hasDistinctTranslation ? translated : original);
+            translatedView.setTextSize(14);
+            translatedView.setTextColor(text);
+            translatedView.setLineSpacing(0, 1.16f);
+            translatedView.setPadding(0, dp(4), 0, 0);
+            bubble.addView(translatedView);
+
+            if (hasDistinctTranslation) {
+                TextView originalLabel = new TextView(this);
+                originalLabel.setText("原文");
+                originalLabel.setTextSize(9);
+                originalLabel.setTextColor(muted);
+                originalLabel.setTypeface(Typeface.DEFAULT_BOLD);
+                originalLabel.setPadding(0, dp(7), 0, dp(2));
+                bubble.addView(originalLabel);
+
+                TextView originalView = new TextView(this);
+                originalView.setText(original);
+                originalView.setTextSize(11);
+                originalView.setTextColor(muted);
+                originalView.setLineSpacing(0, 1.12f);
+                bubble.addView(originalView);
+            } else if (isTranslationPending(message)) {
+                TextView pending = new TextView(this);
+                pending.setText("翻譯中…");
+                pending.setTextSize(9);
+                pending.setTextColor(muted);
+                pending.setPadding(0, dp(5), 0, 0);
+                bubble.addView(pending);
+            }
+        }
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = right ? Gravity.END : Gravity.START;
+        lp.setMargins(right ? dp(34) : 0, dp(4), right ? 0 : dp(34), dp(5));
+        bubble.setMinimumWidth(dp(130));
+        bubble.setLayoutParams(lp);
+        container.addView(bubble);
+    }
+
+    private boolean isTranslationPending(Message message) {
+        synchronized (translationInFlight) {
+            return message != null && translationInFlight.contains(message.id);
+        }
     }
 
     private void addBubble(LinearLayout container, String label, String content, boolean right, boolean privateBubble) {
