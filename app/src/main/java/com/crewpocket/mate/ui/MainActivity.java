@@ -75,6 +75,11 @@ public class MainActivity extends Activity {
     private LinearLayout taskComposerCard;
     private EditText taskInput;
     private Button taskInputButton;
+    private Button taskVoiceButton;
+    private LinearLayout modeActions;
+    private LinearLayout utilities;
+    private Button newTaskButton;
+    private Button historyButton;
     private LinearLayout audienceCard;
     private TextView audienceTitle;
     private TextView audienceDetail;
@@ -167,7 +172,7 @@ public class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         titleBox.addView(title);
         TextView subtitle = new TextView(this);
-        subtitle.setText("先告訴 Mate 任務，再把手機交給要溝通的人。");
+        subtitle.setText("把想說的交給 Mate。");
         subtitle.setTextSize(12);
         subtitle.setTextColor(muted);
         subtitle.setPadding(0, dp(2), 0, 0);
@@ -200,13 +205,23 @@ public class MainActivity extends Activity {
         taskComposerCard.setPadding(dp(14), dp(12), dp(14), dp(12));
         taskComposerCard.setBackground(roundRect(surface, 18));
         TextView composerLabel = new TextView(this);
-        composerLabel.setText("告訴 Mate 你要做什麼");
+        composerLabel.setText("直接說，或打字");
         composerLabel.setTextColor(text);
-        composerLabel.setTextSize(13);
+        composerLabel.setTextSize(16);
         composerLabel.setTypeface(Typeface.DEFAULT_BOLD);
         taskComposerCard.addView(composerLabel);
+
+        taskVoiceButton = actionButton("🎙  說給 Mate 聽", accent);
+        taskVoiceButton.setTextSize(14);
+        taskVoiceButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { handlePrimaryAction(); }
+        });
+        LinearLayout.LayoutParams voiceLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        voiceLp.setMargins(0, dp(12), 0, dp(12));
+        taskComposerCard.addView(taskVoiceButton, voiceLp);
+
         taskInput = new EditText(this);
-        taskInput.setHint("例如：幫我問能不能延後退房，超過 500 泰銖先問我");
+        taskInput.setHint("例如：幫我問櫃台能不能延後退房，超過 500 泰銖先問我");
         taskInput.setTextColor(text);
         taskInput.setHintTextColor(muted);
         taskInput.setTextSize(13);
@@ -218,7 +233,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         inputLp.setMargins(0, dp(10), 0, dp(8));
         taskComposerCard.addView(taskInput, inputLp);
-        taskInputButton = actionButton("用文字交代", accentSurface);
+        taskInputButton = actionButton("送出文字", accentSurface);
         taskInputButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { submitTypedBrief(); }
         });
@@ -269,7 +284,7 @@ public class MainActivity extends Activity {
         privateLp.setMargins(0, dp(6), 0, dp(10));
         root.addView(privateScroll, privateLp);
 
-        LinearLayout modeActions = new LinearLayout(this);
+        modeActions = new LinearLayout(this);
         modeActions.setOrientation(LinearLayout.HORIZONTAL);
         primaryButton = actionButton("🔒 交代給 Mate", accent);
         primaryButton.setTextSize(13);
@@ -286,20 +301,20 @@ public class MainActivity extends Activity {
         modeActions.addView(directButton, directLp);
         root.addView(modeActions);
 
-        LinearLayout utilities = new LinearLayout(this);
+        utilities = new LinearLayout(this);
         utilities.setOrientation(LinearLayout.HORIZONTAL);
-        Button newTask = actionButton("新任務", surface2);
-        newTask.setOnClickListener(new View.OnClickListener() {
+        newTaskButton = actionButton("新任務", surface2);
+        newTaskButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { startFreshTask(); }
         });
-        utilities.addView(newTask, new LinearLayout.LayoutParams(0, dp(42), 1f));
-        Button history = actionButton("紀錄", surface2);
-        history.setOnClickListener(new View.OnClickListener() {
+        utilities.addView(newTaskButton, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        historyButton = actionButton("紀錄", surface2);
+        historyButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showHistory(); }
         });
         LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
         historyLp.setMargins(dp(8), 0, 0, 0);
-        utilities.addView(history, historyLp);
+        utilities.addView(historyButton, historyLp);
         LinearLayout.LayoutParams utilitiesLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         utilitiesLp.setMargins(0, dp(8), 0, 0);
         root.addView(utilities, utilitiesLp);
