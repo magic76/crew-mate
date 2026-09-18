@@ -261,3 +261,14 @@ During stage two, tapping **補充** now starts a one-shot private context captu
 - once consensus is ready, the app automatically returns to `EXTERNAL_WITH_MATE`
 
 The top call indicator distinguishes **AI 通話中**, **私下補充中**, and **Mate 正在更新補充** so websocket connectivity is not confused with conversational state.
+
+
+## Spoken stage-one alignment
+
+Stage one is a real private voice conversation between the user and Mate, not a text-only setup form.
+
+- `PRIVATE_TO_MATE` remains active while Mate is clarifying the task.
+- pressing **我交代完了** finalizes the current brief without muting Mate playback.
+- if Mate needs more information, `request_user_input` still records the question in product state, but Mate must also say the same question aloud in the user's language.
+- typed briefs also enter the private voice channel so Mate can answer aloud.
+- only when task consensus becomes ready does the UI leave `PRIVATE_TO_MATE` and move to the silent confirmation screen before stage two.

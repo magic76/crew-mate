@@ -446,9 +446,10 @@ public class MainActivity extends Activity {
                 return;
             }
             flushInputTurn();
-            applyAudience(SpeechAudience.MATE_HANDLING);
+            // Stage 1 remains a real two-way private voice conversation until consensus is ready.
+            // Keeping PRIVATE_TO_MATE here allows Mate's clarification question to be heard.
             runtime.finalizeTaskBrief();
-            status("正在整理任務共識…", amber);
+            status("Mate 正在整理，會直接跟你確認…", amber);
             return;
         }
         if (isInPersonMode() && taskReady(viewedSession)) {
@@ -632,6 +633,9 @@ public class MainActivity extends Activity {
                         && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
                     callStateText.setText("● 私下補充中 · 請說話");
                     callStateText.setTextColor(accent);
+                } else if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
+                    callStateText.setText("● 你 ↔ Mate 對話中");
+                    callStateText.setTextColor(accent);
                 } else if (speechAudience == SpeechAudience.MATE_HANDLING
                         && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
                     callStateText.setText("● Mate 正在更新補充");
@@ -665,18 +669,25 @@ public class MainActivity extends Activity {
         if (taskInput != null) taskInput.setText("");
         if (runtime == null) {
             pendingTypedBrief = value;
-            ensureRuntime(SpeechAudience.MATE_HANDLING);
+            privateReturnAudience = SpeechAudience.MATE_HANDLING;
+            ensureRuntime(SpeechAudience.PRIVATE_TO_MATE);
             return;
         }
 
         runtime.submitPrivateText(value);
 
-        // Typed input is already private; do not turn the microphone on just to submit text.
+        // Typed input is private, but stage 1 stays in PRIVATE_TO_MATE so Mate can reply aloud.
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
-            oneShotPrivateSupplement = false;
-            applyAudience(SpeechAudience.MATE_HANDLING);
-            runtime.finalizeTaskBrief();
-            status("正在整理任務共識…", amber);
+            if (oneShotPrivateSupplement
+                    && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
+                oneShotPrivateSupplement = false;
+                applyAudience(SpeechAudience.MATE_HANDLING);
+                runtime.finalizeTaskBrief();
+                status("Mate 正在更新補充…", amber);
+            } else {
+                runtime.finalizePrivateSupplementAfterCurrentTurn();
+                status("Mate 正在整理，會直接跟你確認…", amber);
+            }
         } else {
             status("Mate handling", green);
         }
@@ -827,8 +838,8 @@ public class MainActivity extends Activity {
                             String pending = pendingTypedBrief;
                             pendingTypedBrief = "";
                             runtime.submitPrivateText(pending);
-                            applyAudience(SpeechAudience.MATE_HANDLING);
-                            status("Mate handling", green);
+                            runtime.finalizePrivateSupplementAfterCurrentTurn();
+                            status("Mate 正在整理，會直接跟你確認…", amber);
                         }
                     }
                 });
@@ -893,12 +904,23 @@ public class MainActivity extends Activity {
                                 && speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
                             privateReturnAudience = SpeechAudience.EXTERNAL_WITH_MATE;
                             applyAudience(SpeechAudience.MATE_HANDLING);
+                        } else if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT
+                                && privateReturnAudience != SpeechAudience.EXTERNAL_WITH_MATE
+                                && speechAudience != SpeechAudience.PRIVATE_TO_MATE) {
+                            // Stage 1 clarification is a spoken private conversation.
+                            applyAudience(SpeechAudience.PRIVATE_TO_MATE);
+                            status("Mate 正在跟你確認", accent);
                         } else if (session.consensusReady()
                                 && privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
                                 && speechAudience == SpeechAudience.MATE_HANDLING) {
                             applyAudience(SpeechAudience.EXTERNAL_WITH_MATE);
                             Toast.makeText(MainActivity.this, "共識已更新，繼續對話", Toast.LENGTH_SHORT).show();
                             status("External live", green);
+                        } else if (session.consensusReady()
+                                && privateReturnAudience != SpeechAudience.EXTERNAL_WITH_MATE
+                                && speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
+                            applyAudience(SpeechAudience.MATE_HANDLING);
+                            status("Consensus ready", green);
                         }
                         renderSession(session);
                     }
