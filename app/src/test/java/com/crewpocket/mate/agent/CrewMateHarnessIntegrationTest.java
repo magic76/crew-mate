@@ -100,6 +100,15 @@ public class CrewMateHarnessIntegrationTest {
     }
 
     @Test
+    public void stageOneClarificationMustBeSpokenPrivately() {
+        String prompt = new CrewMateAgentSpec().systemPrompt();
+
+        assertTrue(prompt.contains("clarification is a spoken conversation"));
+        assertTrue(prompt.contains("say that same concise question aloud"));
+        assertTrue(prompt.contains("PRIVATE_TO_MATE"));
+    }
+
+    @Test
     public void agentPromptDoesNotRequirePaymentForUnrelatedTasks() {
         String prompt = new CrewMateAgentSpec().systemPrompt();
 
