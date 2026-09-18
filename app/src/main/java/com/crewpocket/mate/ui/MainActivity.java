@@ -1113,35 +1113,46 @@ public class MainActivity extends Activity {
 
     private void renderControls(CommunicationSession session) {
         if (session == null) {
-            primaryButton.setText("🎙 用語音交代");
+            primaryButton.setText("開始");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
-            taskInputButton.setText("用文字交代");
+            taskVoiceButton.setText("🎙  說給 Mate 聽");
+            taskInputButton.setText("送出文字");
             return;
         }
+
         if (session.status() == CommunicationSession.Status.COMPLETED) {
-            primaryButton.setText("交代新任務");
+            primaryButton.setText("建立新任務");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
             return;
         }
+
         if (speechAudience == SpeechAudience.USER_DIRECT) {
             primaryButton.setText("讓 Mate 繼續");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
             directButton.setVisibility(View.GONE);
             return;
         }
+
         if (speechAudience == SpeechAudience.PRIVATE_TO_MATE) {
             primaryButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
                     ? "完成補充"
                     : "我說完了");
             primaryButton.setBackground(roundRect(accent, 11));
             directButton.setVisibility(View.GONE);
+            taskVoiceButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                    ? "✓  完成補充"
+                    : "✓  我說完了");
             taskInputButton.setText(privateReturnAudience == SpeechAudience.EXTERNAL_WITH_MATE
-                    ? "文字補充並返回對話"
-                    : "用文字交代");
+                    ? "送出文字補充"
+                    : "送出文字");
             return;
         }
+
+        taskVoiceButton.setText("🎙  繼續說");
+        taskInputButton.setText("送出文字");
+
         if (speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
             primaryButton.setText("🔒 補充給 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
@@ -1150,25 +1161,32 @@ public class MainActivity extends Activity {
             directButton.setBackground(roundRect(direct, 11));
             return;
         }
+
         if (runtime == null && (session.status() == CommunicationSession.Status.REPLY_RECEIVED
                 || session.status() == CommunicationSession.Status.STOPPED)) {
             primaryButton.setText("讓 Mate 繼續");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else if (session.status() == CommunicationSession.Status.NEEDS_USER_INPUT) {
-            primaryButton.setText("🔒 回答 Mate");
+            primaryButton.setText("回答 Mate");
             primaryButton.setBackground(roundRect(accent, 11));
         } else if (isInPersonMode() && taskReady(session)) {
             primaryButton.setText("開始幫我談");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else {
-            primaryButton.setText("🎙 再補充");
+            primaryButton.setText("繼續");
             primaryButton.setBackground(roundRect(accent, 11));
         }
-        boolean canSupplement = isInPersonMode() && session != null;
-        directButton.setVisibility(canSupplement && taskReady(session) ? View.VISIBLE : View.GONE);
-        directButton.setText("🔒 補充條件");
-        directButton.setBackground(roundRect(accent, 11));
-        taskInputButton.setText("用文字補充");
+
+        boolean canSupplement = isInPersonMode() && taskReady(session);
+        directButton.setVisibility(canSupplement ? View.VISIBLE : View.GONE);
+        directButton.setText(publicConversationActive() ? "我要自己說" : "修改任務");
+        directButton.setBackground(roundRect(publicConversationActive() ? direct : surface2, 11));
+    }
+
+    private boolean publicConversationActive() {
+        return speechAudience == SpeechAudience.EXTERNAL_WITH_MATE
+                || speechAudience == SpeechAudience.USER_DIRECT
+                || hasExternalMessages(viewedSession);
     }
 
     private boolean hasExternalMessages(CommunicationSession session) {
