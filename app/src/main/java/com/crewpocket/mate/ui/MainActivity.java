@@ -817,6 +817,11 @@ public class MainActivity extends Activity {
                                 && speechAudience == SpeechAudience.EXTERNAL_WITH_MATE) {
                             privateReturnAudience = SpeechAudience.EXTERNAL_WITH_MATE;
                             applyAudience(SpeechAudience.MATE_HANDLING);
+                        } else if (session.consensusReady()
+                                && speechAudience == SpeechAudience.PRIVATE_TO_MATE
+                                && privateReturnAudience != SpeechAudience.EXTERNAL_WITH_MATE) {
+                            applyAudience(SpeechAudience.MATE_HANDLING);
+                            status("Consensus ready", green);
                         }
                         renderSession(session);
                     }
@@ -1121,7 +1126,7 @@ public class MainActivity extends Activity {
             } else if (isInPersonMode() && taskReady(session)) {
                 styleAudience(Color.rgb(18, 56, 48), green);
                 audienceTitle.setText("✓ 你和 Mate 已對齊");
-                audienceDetail.setText("下面的「本次任務共識」就是 Mate 接下來會依照的目標與邊界。");
+                audienceDetail.setText("確認下方共識後，按「讓 Mate 跟 " + person + " 說」進入第二階段。");
             } else {
                 styleAudience(surface2, muted);
                 audienceTitle.setText("正在跟 Mate 對齊需求");
@@ -1202,7 +1207,7 @@ public class MainActivity extends Activity {
             primaryButton.setBackground(roundRect(accent, 11));
         } else if (isInPersonMode() && taskReady(session)) {
             String person = session.targetPerson().isEmpty() ? "對方" : session.targetPerson();
-            primaryButton.setText("讓 Mate 跟 " + person + " 說");
+            primaryButton.setText("第 2 步 · 讓 Mate 跟 " + person + " 說");
             primaryButton.setBackground(roundRect(Color.rgb(5, 150, 105), 11));
         } else {
             primaryButton.setText("繼續");
