@@ -204,3 +204,15 @@ Task consensus can store a preferred payment method and any explicitly authorize
 A different payment method is consequential by default. For example, if the user specified **credit card** and the merchant says **cash only**, Mate must call `request_user_input` unless cash was already explicitly authorized as a fallback. Mate must not assume the user has cash or accept a new payment method on the user's behalf.
 
 The same escalation principle applies to deposits, identity documents, materially different prices, timing changes, and substitutions outside the shared consensus.
+
+
+## Audio output mode
+
+Crew Mate supports two playback modes for Gemini Live audio:
+
+- **媒體**: uses Android media playback attributes (`USAGE_MEDIA`) and the normal media audio path.
+- **通話**: uses communication playback attributes (`USAGE_VOICE_COMMUNICATION`) with `MODE_IN_COMMUNICATION`.
+
+The selected mode is persisted globally and can be switched while a Live session is active. Switching recreates the `AudioTrack` with the new attributes without recreating the task or Gemini session. Closing the Live session restores Android's normal audio mode.
+
+The compact top control displays `🔊 媒體` or `☎ 通話`; it remains available during stage two while the language control is hidden to preserve dialogue space.
