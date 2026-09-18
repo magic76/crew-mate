@@ -1251,6 +1251,11 @@ public class MainActivity extends Activity {
             meta.setPadding(0, dp(8), 0, 0);
             card.addView(meta);
 
+            LinearLayout cardActions = new LinearLayout(this);
+            cardActions.setOrientation(LinearLayout.HORIZONTAL);
+            cardActions.setGravity(Gravity.CENTER_VERTICAL);
+            cardActions.setPadding(0, dp(8), 0, 0);
+
             TextView action = new TextView(this);
             action.setText(session.status() == CommunicationSession.Status.COMPLETED
                     ? "查看詳情  ›"
@@ -1258,8 +1263,18 @@ public class MainActivity extends Activity {
             action.setTextColor(accent);
             action.setTextSize(11);
             action.setTypeface(Typeface.DEFAULT_BOLD);
-            action.setPadding(0, dp(8), 0, 0);
-            card.addView(action);
+            cardActions.addView(action, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            Button remove = actionButton("移除", Color.rgb(88, 38, 48));
+            remove.setTextSize(10);
+            remove.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    confirmRemoveHistorySession(session, dialog);
+                }
+            });
+            cardActions.addView(remove, new LinearLayout.LayoutParams(dp(58), dp(34)));
+            card.addView(cardActions);
 
             card.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
@@ -1439,7 +1454,18 @@ public class MainActivity extends Activity {
         close.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { dialog.dismiss(); }
         });
-        actions.addView(close, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        actions.addView(close, new LinearLayout.LayoutParams(0, dp(44), 0.8f));
+
+        Button remove = actionButton("移除", Color.rgb(88, 38, 48));
+        remove.setTextSize(10);
+        remove.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                confirmRemoveHistorySession(session, dialog);
+            }
+        });
+        LinearLayout.LayoutParams removeLp = new LinearLayout.LayoutParams(0, dp(44), 0.78f);
+        removeLp.setMargins(dp(8), 0, 0, 0);
+        actions.addView(remove, removeLp);
 
         Button primary = actionButton(
                 session.status() == CommunicationSession.Status.COMPLETED
