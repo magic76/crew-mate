@@ -25,10 +25,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.crewpocket.mate.agent.CrewMateRuntime;
-import com.crewpocket.mate.channel.FakeMessagingBackend;
 import com.crewpocket.mate.channel.InPersonMessagingBackend;
 import com.crewpocket.mate.channel.MessagingBackend;
-import com.crewpocket.mate.channel.TelegramMessagingBackend;
 import com.crewpocket.mate.config.AppConfig;
 import com.crewpocket.mate.model.CommunicationSession;
 import com.crewpocket.mate.model.Message;
@@ -114,6 +112,9 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         sessionStore = new SessionStore(this);
+        // Crew Mate's product flow is physical handoff through Gemini Live.
+        // Migrate any old dev/test provider preference so it cannot leak into a new task.
+        AppConfig.setMessagingProvider(this, AppConfig.PROVIDER_IN_PERSON);
         setContentView(buildUi());
         restoreRequestedOrLatest(getIntent());
     }
@@ -127,11 +128,20 @@ public class MainActivity extends Activity {
 
     private void restoreRequestedOrLatest(Intent intent) {
         CommunicationSession restored = null;
+        boolean explicitlyRequested = false;
         if (intent != null) {
             String requested = intent.getStringExtra(CommunicationContinuationService.EXTRA_SESSION_ID);
-            if (requested != null && !requested.trim().isEmpty()) restored = sessionStore.loadById(requested.trim());
+            if (requested != null && !requested.trim().isEmpty()) {
+                explicitlyRequested = true;
+                restored = sessionStore.loadById(requested.trim());
+            }
         }
-        if (restored == null) restored = sessionStore.loadLatest();
+        if (restored == null && !explicitlyRequested) {
+            CommunicationSession latest = sessionStore.loadLatest();
+            // Old Fake/Telegram sessions remain available in history, but must never become
+            // the active physical handoff flow on app launch.
+            if (latest != null && !looksLikeRemoteMessagingSession(latest)) restored = latest;
+        }
         viewedSession = restored;
         speechAudience = passiveAudience(restored);
         renderSession(viewedSession);
@@ -145,6 +155,25 @@ public class MainActivity extends Activity {
             String value = CrewMateRuntime.displayStatus(viewedSession.status());
             status(value, statusColor(value));
         }
+    }
+
+    private boolean looksLikeRemoteMessagingSession(CommunicationSession session) {
+        if (session == null) return false;
+        for (Message message : session.messages()) {
+            if (message.sender == Message.Sender.MATE) {
+                Message.Status status = message.status();
+                if (status == Message.Status.DRAFT
+                        || status == Message.Status.PENDING_APPROVAL
+                        || status == Message.Status.SENDING
+                        || status == Message.Status.SENT
+                        || status == Message.Status.DELIVERED
+                        || status == Message.Status.FAILED
+                        || status == Message.Status.CANCELLED) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private SpeechAudience passiveAudience(CommunicationSession session) {
@@ -566,12 +595,6 @@ public class MainActivity extends Activity {
             showSettings();
             return;
         }
-        if (AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))
-                && AppConfig.getTelegramBotToken(this).isEmpty()) {
-            Toast.makeText(this, "Telegram 模式需要 Bot token。", Toast.LENGTH_LONG).show();
-            showSettings();
-            return;
-        }
         if (initialAudience.routesMicrophoneToMate()
                 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingStartAfterPermission = true;
@@ -583,19 +606,11 @@ public class MainActivity extends Activity {
     }
 
     private MessagingBackend createMessagingBackend() {
-        String provider = AppConfig.getMessagingProvider(this);
-        if (AppConfig.PROVIDER_TELEGRAM.equals(provider)) {
-            return new TelegramMessagingBackend(this, AppConfig.getTelegramBotToken(this));
-        }
-        if (AppConfig.PROVIDER_FAKE.equals(provider)) return new FakeMessagingBackend();
         return new InPersonMessagingBackend();
     }
 
     private boolean isInPersonMode() {
-        if (messagingBackend != null) {
-            return messagingBackend.channelMode() == MessagingBackend.ChannelMode.IN_PERSON;
-        }
-        return AppConfig.PROVIDER_IN_PERSON.equals(AppConfig.getMessagingProvider(this));
+        return true;
     }
 
     private void startRuntime(String key, final SpeechAudience initialAudience) {
@@ -730,10 +745,6 @@ public class MainActivity extends Activity {
             runtime.resumePersistedTask();
         } else if (resumeAfterReply && initialAudience == SpeechAudience.MATE_HANDLING) {
             runtime.resumePersistedTask();
-        } else if (resumeExisting
-                && resumeStatus == CommunicationSession.Status.WAITING_FOR_REPLY
-                && AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))) {
-            watchReplyWhileRuntimeIsActive(liveSession);
         }
     }
 
@@ -811,12 +822,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean shouldHandoffToBackground(CommunicationSession session) {
-        return session != null
-                && !session.userDirectControl()
-                && session.status() == CommunicationSession.Status.WAITING_FOR_REPLY
-                && session.delegationAuthorized()
-                && AppConfig.PROVIDER_TELEGRAM.equals(AppConfig.getMessagingProvider(this))
-                && !AppConfig.getTelegramBotToken(this).isEmpty();
+        return false;
     }
 
     private void requestNotificationPermissionIfUseful() {
@@ -828,6 +834,7 @@ public class MainActivity extends Activity {
 
     private void startFreshTask() {
         if (runtime != null) stopRuntime();
+        AppConfig.setMessagingProvider(this, AppConfig.PROVIDER_IN_PERSON);
         viewedSession = null;
         speechAudience = SpeechAudience.IDLE;
         editedApprovalText = "";
@@ -876,66 +883,26 @@ public class MainActivity extends Activity {
         final EditText api = dialogInput("Gemini API key", true);
         api.setText(AppConfig.getApiKey(this));
         box.addView(api, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
-        final String[] providerValue = new String[]{AppConfig.getMessagingProvider(this)};
-        final Button provider = actionButton(providerLabel(providerValue[0]), Color.rgb(71, 85, 105));
-        LinearLayout.LayoutParams providerLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
-        providerLp.setMargins(0, dp(10), 0, 0);
-        box.addView(provider, providerLp);
-        final EditText token = dialogInput("Telegram bot token", true);
-        token.setText(AppConfig.getTelegramBotToken(this));
-        token.setVisibility(AppConfig.PROVIDER_TELEGRAM.equals(providerValue[0]) ? View.VISIBLE : View.GONE);
-        LinearLayout.LayoutParams tokenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
-        tokenLp.setMargins(0, dp(10), 0, 0);
-        box.addView(token, tokenLp);
-        final TextView note = new TextView(this);
-        note.setText(providerNote(providerValue[0]));
+
+        TextView note = new TextView(this);
+        note.setText("現場語音模式：把手機交給對方後，Mate 只會根據麥克風實際聽到的內容回應。");
         note.setTextColor(Color.DKGRAY);
-        note.setTextSize(11);
-        note.setPadding(0, dp(8), 0, 0);
+        note.setTextSize(12);
+        note.setPadding(0, dp(10), 0, 0);
         box.addView(note);
-        provider.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (AppConfig.PROVIDER_IN_PERSON.equals(providerValue[0])) {
-                    providerValue[0] = AppConfig.PROVIDER_TELEGRAM;
-                } else if (AppConfig.PROVIDER_TELEGRAM.equals(providerValue[0])) {
-                    providerValue[0] = AppConfig.PROVIDER_FAKE;
-                } else {
-                    providerValue[0] = AppConfig.PROVIDER_IN_PERSON;
-                }
-                provider.setText(providerLabel(providerValue[0]));
-                token.setVisibility(AppConfig.PROVIDER_TELEGRAM.equals(providerValue[0]) ? View.VISIBLE : View.GONE);
-                note.setText(providerNote(providerValue[0]));
-            }
-        });
+
         new AlertDialog.Builder(this)
                 .setTitle("Crew Mate 設定")
                 .setView(box)
                 .setPositiveButton("儲存", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         AppConfig.setApiKey(MainActivity.this, api.getText().toString());
-                        AppConfig.setTelegramBotToken(MainActivity.this, token.getText().toString());
-                        AppConfig.setMessagingProvider(MainActivity.this, providerValue[0]);
+                        AppConfig.setMessagingProvider(MainActivity.this, AppConfig.PROVIDER_IN_PERSON);
                         renderSession(viewedSession);
                     }
                 })
                 .setNegativeButton("取消", null)
                 .show();
-    }
-
-    private String providerLabel(String provider) {
-        if (AppConfig.PROVIDER_TELEGRAM.equals(provider)) return "Provider: Telegram";
-        if (AppConfig.PROVIDER_FAKE.equals(provider)) return "Provider: Fake";
-        return "Provider: In person";
-    }
-
-    private String providerNote(String provider) {
-        if (AppConfig.PROVIDER_TELEGRAM.equals(provider)) {
-            return "Telegram 對象必須先跟 Bot 傳過 /start，Mate 才能找到並與他對話。";
-        }
-        if (AppConfig.PROVIDER_FAKE.equals(provider)) {
-            return "Fake provider 只供測試 remote messaging 與 approval flow。";
-        }
-        return "In person：先私下交代，再把手機交給對方；Mate 會直接用 Gemini Live 說話，不會呼叫 remote send_message。";
     }
 
     private EditText dialogInput(String hint, boolean secret) {
