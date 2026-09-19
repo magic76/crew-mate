@@ -38,6 +38,7 @@ import com.crewpocket.mate.model.InterfaceLanguage;
 import com.crewpocket.mate.model.Message;
 import com.crewpocket.mate.model.SpeechAudience;
 import com.crewpocket.mate.storage.SessionStore;
+import com.crewpocket.mate.ui.view.CrewMateUiKit;
 import com.crewpocket.mate.voice.GeminiLiveModelSession;
 import com.crewpocket.mate.voice.GeminiTranslationService;
 import com.crewpocket.mate.voice.TurnTextAccumulator;
@@ -202,292 +203,79 @@ public class MainActivity extends Activity {
     }
 
     private View buildUi() {
-        final LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        final int baseLeft = dp(18);
-        final int baseTop = dp(16);
-        final int baseRight = dp(18);
-        final int baseBottom = dp(16);
-        final int bottomSafety = dp(10);
-        root.setPadding(baseLeft, baseTop, baseRight, baseBottom + bottomSafety);
-        root.setBackgroundColor(bg);
-        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-            @Override public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-                int left;
-                int top;
-                int right;
-                int bottom;
-                if (Build.VERSION.SDK_INT >= 30) {
-                    Insets barsAndCutout = insets.getInsets(
-                            WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                    Insets navigation = insets.getInsets(
-                            WindowInsets.Type.navigationBars() | WindowInsets.Type.mandatorySystemGestures());
-                    left = barsAndCutout.left;
-                    top = barsAndCutout.top;
-                    right = barsAndCutout.right;
-                    bottom = Math.max(barsAndCutout.bottom, navigation.bottom);
-                } else {
-                    left = insets.getSystemWindowInsetLeft();
-                    top = insets.getSystemWindowInsetTop();
-                    right = insets.getSystemWindowInsetRight();
-                    bottom = insets.getSystemWindowInsetBottom();
-                }
-                v.setPadding(
-                        baseLeft + left,
-                        baseTop + top,
-                        baseRight + right,
-                        baseBottom + bottom + bottomSafety);
-                return insets;
-            }
-        });
-        root.post(new Runnable() {
-            @Override public void run() { root.requestApplyInsets(); }
-        });
+        CrewMateUiKit kit = new CrewMateUiKit(
+                this,
+                bg,
+                surface,
+                surface2,
+                text,
+                muted,
+                accent,
+                accentSurface,
+                direct);
 
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout titleBox = new LinearLayout(this);
-        titleBox.setOrientation(LinearLayout.VERTICAL);
-        TextView title = new TextView(this);
-        title.setText("Crew Mate");
-        title.setTextSize(26);
-        title.setTextColor(text);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        titleBox.addView(title);
-        TextView subtitle = new TextView(this);
-        subtitle.setText(ui("把想說的交給 Mate。", "Hand it to Mate."));
-        subtitle.setTextSize(12);
-        subtitle.setTextColor(muted);
-        subtitle.setPadding(0, dp(2), 0, 0);
-        titleBox.addView(subtitle);
-        top.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        CrewMateScreenBuilder.Binding binding = new CrewMateScreenBuilder(
+                this,
+                kit,
+                new CrewMateScreenBuilder.Texts() {
+                    @Override public String ui(String zh, String en) {
+                        return MainActivity.this.ui(zh, en);
+                    }
+                },
+                new CrewMateScreenBuilder.Actions() {
+                    @Override public void onNewTask() { requestNewTask(); }
+                    @Override public void onHistory() { showHistory(); }
+                    @Override public void onSettings() { showSettings(); }
+                    @Override public void onLanguage() { showLanguagePicker(); }
+                    @Override public void onAudioOutput() { toggleAudioOutputMode(); }
+                    @Override public void onTranscriptMode() { cycleTranscriptDisplayMode(); }
+                    @Override public void onCallToggle() { handleLiveCallToggle(); }
+                    @Override public void onPrimaryAction() { handlePrimaryAction(); }
+                    @Override public void onSecondaryAction() { handleSecondaryAction(); }
+                    @Override public void onCompleteTask() { confirmCompleteTask(); }
+                    @Override public void onMore() { showEndTaskOptions(); }
+                    @Override public void onSubmitTypedBrief() { submitTypedBrief(); }
+                })
+                .build();
 
-        newTaskButton = actionButton(ui("＋ 新任務", "+ New task"), surface2);
-        newTaskButton.setTextSize(11);
-        newTaskButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { requestNewTask(); }
-        });
-        top.addView(newTaskButton, new LinearLayout.LayoutParams(dp(82), dp(38)));
+        primaryButton = binding.primaryButton;
+        directButton = binding.directButton;
+        endConversationButton = binding.endConversationButton;
+        moreButton = binding.moreButton;
+        settingsButton = binding.settingsButton;
+        callBar = binding.callBar;
+        callStateText = binding.callStateText;
+        languageButton = binding.languageButton;
+        audioOutputButton = binding.audioOutputButton;
+        transcriptModeButton = binding.transcriptModeButton;
+        callToggleButton = binding.callToggleButton;
+        statusText = binding.statusText;
+        taskText = binding.taskText;
+        taskComposerCard = binding.taskComposerCard;
+        composerLabel = binding.composerLabel;
+        taskInput = binding.taskInput;
+        taskInputButton = binding.taskInputButton;
+        taskVoiceButton = binding.taskVoiceButton;
+        modeActions = binding.modeActions;
+        bottomActionSpacer = binding.bottomActionSpacer;
+        utilities = binding.utilities;
+        newTaskButton = binding.newTaskButton;
+        historyButton = binding.historyButton;
+        audienceCard = binding.audienceCard;
+        audienceTitle = binding.audienceTitle;
+        audienceDetail = binding.audienceDetail;
+        externalSectionTitle = binding.externalSectionTitle;
+        privateSectionTitle = binding.privateSectionTitle;
+        externalTimeline = binding.externalTimeline;
+        privateTimeline = binding.privateTimeline;
+        externalScroll = binding.externalScroll;
+        privateScroll = binding.privateScroll;
 
-        historyButton = actionButton(ui("紀錄", "History"), surface2);
-        historyButton.setTextSize(11);
-        historyButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showHistory(); }
-        });
-        LinearLayout.LayoutParams historyTopLp = new LinearLayout.LayoutParams(dp(58), dp(38));
-        historyTopLp.setMargins(dp(6), 0, 0, 0);
-        top.addView(historyButton, historyTopLp);
-
-        settingsButton = actionButton(ui("設定", "Settings"), surface2);
-        settingsButton.setTextSize(11);
-        settingsButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showSettings(); }
-        });
-        LinearLayout.LayoutParams settingsLp = new LinearLayout.LayoutParams(dp(64), dp(38));
-        settingsLp.setMargins(dp(6), 0, 0, 0);
-        top.addView(settingsButton, settingsLp);
-        root.addView(top);
-
-        callBar = new LinearLayout(this);
-        callBar.setOrientation(LinearLayout.HORIZONTAL);
-        callBar.setGravity(Gravity.CENTER_VERTICAL);
-        callBar.setPadding(dp(12), dp(8), dp(8), dp(8));
-        callBar.setBackground(roundRect(surface, 14));
-
-        callStateText = new TextView(this);
-        callStateText.setTextSize(12);
-        callStateText.setTypeface(Typeface.DEFAULT_BOLD);
-        callBar.addView(callStateText,
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        languageButton = actionButton(ui("🌐 自動 → 自動", "🌐 Auto → Auto"), surface2);
-        languageButton.setTextSize(10);
-        languageButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showLanguagePicker(); }
-        });
-        LinearLayout.LayoutParams languageLp = new LinearLayout.LayoutParams(dp(104), dp(38));
-        languageLp.setMargins(dp(6), 0, dp(6), 0);
-        callBar.addView(languageButton, languageLp);
-
-        audioOutputButton = actionButton(ui("🔊 媒體", "🔊 Media"), surface2);
-        audioOutputButton.setTextSize(10);
-        audioOutputButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { toggleAudioOutputMode(); }
-        });
-        LinearLayout.LayoutParams outputLp = new LinearLayout.LayoutParams(dp(82), dp(38));
-        outputLp.setMargins(0, 0, dp(6), 0);
-        callBar.addView(audioOutputButton, outputLp);
-
-        transcriptModeButton = actionButton(ui("雙語", "Bilingual"), surface2);
-        transcriptModeButton.setTextSize(10);
-        transcriptModeButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { cycleTranscriptDisplayMode(); }
-        });
-        LinearLayout.LayoutParams transcriptLp = new LinearLayout.LayoutParams(dp(64), dp(38));
-        transcriptLp.setMargins(0, 0, dp(6), 0);
-        callBar.addView(transcriptModeButton, transcriptLp);
-
-        callToggleButton = actionButton(ui("開啟", "Start"), surface2);
-        callToggleButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { handleLiveCallToggle(); }
-        });
-        callBar.addView(callToggleButton, new LinearLayout.LayoutParams(dp(82), dp(38)));
-
-        LinearLayout.LayoutParams callLp = cardLp(dp(10));
-        callLp.setMargins(0, dp(12), 0, dp(10));
-        root.addView(callBar, callLp);
         renderLanguageControl();
         renderAudioOutputControl();
         renderTranscriptModeControl();
         renderLiveCallControl();
-
-        statusText = new TextView(this);
-        statusText.setText("Ready");
-        statusText.setTextColor(muted);
-        statusText.setTextSize(12);
-        statusText.setTypeface(Typeface.DEFAULT_BOLD);
-        statusText.setPadding(dp(12), dp(8), dp(12), dp(8));
-        statusText.setBackground(roundRect(surface2, 12));
-        LinearLayout.LayoutParams statusLp = cardLp(dp(10));
-        statusLp.setMargins(0, dp(14), 0, dp(10));
-        root.addView(statusText, statusLp);
-
-        taskText = cardText(14);
-        taskText.setBackground(roundRect(surface, 18));
-        root.addView(taskText, cardLp(dp(10)));
-
-        taskComposerCard = new LinearLayout(this);
-        taskComposerCard.setOrientation(LinearLayout.VERTICAL);
-        taskComposerCard.setPadding(dp(14), dp(12), dp(14), dp(12));
-        taskComposerCard.setBackground(roundRect(surface, 18));
-        composerLabel = new TextView(this);
-        composerLabel.setText(ui("先告訴 Mate 你想做什麼", "Tell Mate what you need first"));
-        composerLabel.setTextColor(text);
-        composerLabel.setTextSize(16);
-        composerLabel.setTypeface(Typeface.DEFAULT_BOLD);
-        taskComposerCard.addView(composerLabel);
-
-        taskVoiceButton = actionButton(ui("🎙  口頭交代", "🎙  Speak to Mate"), accent);
-        taskVoiceButton.setTextSize(14);
-        taskVoiceButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { handlePrimaryAction(); }
-        });
-        LinearLayout.LayoutParams voiceLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
-        voiceLp.setMargins(0, dp(12), 0, dp(12));
-        taskComposerCard.addView(taskVoiceButton, voiceLp);
-
-        taskInput = new EditText(this);
-        taskInput.setHint(ui("或直接輸入，例如：幫我問櫃台能不能延後退房，超過 500 泰銖先問我", "Or type it, e.g. ask the front desk for late checkout; ask me first if it costs over 500 THB"));
-        taskInput.setTextColor(text);
-        taskInput.setHintTextColor(muted);
-        taskInput.setTextSize(13);
-        taskInput.setSingleLine(false);
-        taskInput.setMinLines(2);
-        taskInput.setMaxLines(4);
-        taskInput.setPadding(dp(10), dp(8), dp(10), dp(8));
-        taskInput.setBackground(roundRect(surface2, 12));
-        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        inputLp.setMargins(0, dp(10), 0, dp(8));
-        taskComposerCard.addView(taskInput, inputLp);
-        taskInputButton = actionButton(ui("送出文字", "Send text"), accentSurface);
-        taskInputButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { submitTypedBrief(); }
-        });
-        taskComposerCard.addView(taskInputButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
-        root.addView(taskComposerCard, cardLp(dp(10)));
-
-        audienceCard = new LinearLayout(this);
-        audienceCard.setOrientation(LinearLayout.VERTICAL);
-        audienceCard.setPadding(dp(15), dp(12), dp(15), dp(12));
-        audienceTitle = new TextView(this);
-        audienceTitle.setTextSize(14);
-        audienceTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        audienceCard.addView(audienceTitle);
-        audienceDetail = new TextView(this);
-        audienceDetail.setTextSize(12);
-        audienceDetail.setLineSpacing(0, 1.15f);
-        audienceDetail.setPadding(0, dp(5), 0, 0);
-        audienceCard.addView(audienceDetail);
-        root.addView(audienceCard, cardLp(dp(10)));
-
-        externalSectionTitle = sectionTitle(ui("對外紀錄", "External conversation"));
-        root.addView(externalSectionTitle);
-        externalTimeline = new LinearLayout(this);
-        externalTimeline.setOrientation(LinearLayout.VERTICAL);
-        externalTimeline.setPadding(dp(10), dp(10), dp(10), dp(10));
-        externalScroll = new ScrollView(this);
-        externalScroll.setFillViewport(true);
-        externalScroll.addView(externalTimeline);
-        externalScroll.setBackground(roundRect(surface, 18));
-        LinearLayout.LayoutParams externalLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.2f);
-        externalLp.setMargins(0, dp(6), 0, dp(10));
-        root.addView(externalScroll, externalLp);
-
-        privateSectionTitle = sectionTitle(ui("🔒 私人 · 你 ↔ Mate", "🔒 Private · You ↔ Mate"));
-        root.addView(privateSectionTitle);
-        privateTimeline = new LinearLayout(this);
-        privateTimeline.setOrientation(LinearLayout.VERTICAL);
-        privateTimeline.setPadding(dp(10), dp(8), dp(10), dp(8));
-        privateScroll = new ScrollView(this);
-        privateScroll.setFillViewport(true);
-        privateScroll.addView(privateTimeline);
-        privateScroll.setBackground(roundRect(surface, 18));
-        LinearLayout.LayoutParams privateLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.45f);
-        privateLp.setMargins(0, dp(6), 0, dp(10));
-        root.addView(privateScroll, privateLp);
-
-        bottomActionSpacer = new View(this);
-        bottomActionSpacer.setVisibility(View.GONE);
-        root.addView(bottomActionSpacer, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
-        modeActions = new LinearLayout(this);
-        modeActions.setOrientation(LinearLayout.HORIZONTAL);
-        modeActions.setGravity(Gravity.BOTTOM | Gravity.CENTER_VERTICAL);
-        modeActions.setClipChildren(false);
-        modeActions.setClipToPadding(false);
-        modeActions.setPadding(0, dp(4), 0, dp(8));
-        primaryButton = actionButton(ui("🔒 交代給 Mate", "🔒 Brief Mate"), accent);
-        primaryButton.setTextSize(13);
-        primaryButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { handlePrimaryAction(); }
-        });
-        modeActions.addView(primaryButton, new LinearLayout.LayoutParams(0, dp(52), 1.45f));
-        directButton = actionButton(ui("我要自己說", "I'll speak myself"), direct);
-        directButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { handleSecondaryAction(); }
-        });
-        LinearLayout.LayoutParams directLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
-        directLp.setMargins(dp(8), 0, 0, 0);
-        modeActions.addView(directButton, directLp);
-
-        endConversationButton = actionButton(ui("完成任務", "Complete task"), Color.rgb(5, 150, 105));
-        endConversationButton.setTextSize(11);
-        endConversationButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { confirmCompleteTask(); }
-        });
-        LinearLayout.LayoutParams endLp = new LinearLayout.LayoutParams(0, dp(52), 0.92f);
-        endLp.setMargins(dp(8), 0, 0, 0);
-        modeActions.addView(endConversationButton, endLp);
-
-        moreButton = actionButton("⋯", surface2);
-        moreButton.setTextSize(16);
-        moreButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showEndTaskOptions(); }
-        });
-        LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(dp(48), dp(52));
-        moreLp.setMargins(dp(8), 0, 0, 0);
-        modeActions.addView(moreButton, moreLp);
-        LinearLayout.LayoutParams modeLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        modeLp.setMargins(0, 0, 0, 0);
-        root.addView(modeActions, modeLp);
-
-        utilities = new LinearLayout(this);
-        utilities.setVisibility(View.GONE);
-        root.addView(utilities);
-        return root;
+        return binding.root;
     }
 
     private void handlePrimaryAction() {
